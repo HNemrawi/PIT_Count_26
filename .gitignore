@@ -1,0 +1,68 @@
+# Ignore the virtual environment folder
+pit25/
+
+# Streamlit secrets
+.streamlit/secrets.toml
+
+# Byte-compiled / cache files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual environment folders (general)
+venv/
+.venv/
+env/
+ENV/
+
+# Build artifacts
+build/
+dist/
+*.egg-info/
+.eggs/
+*.egg
+*.so
+*.dll
+*.pyd
+
+# Logs and outputs
+*.log
+logs/
+output/
+reports/
+*.tmp
+*.bak
+
+# Python test and coverage files
+.pytest_cache/
+.coverage
+*.cover
+htmlcov/
+.tox/
+.nox/
+
+# IDE/editor config
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+*.orig
+
+# Jupyter/IPython
+.ipynb_checkpoints/
+*.ipynb
+
+# Misc
+*.csv
+*.xlsx
+*.json
+.env*
+config/secrets.py
+config/credentials.py
+
+# Keep these files
+!.gitignore
+!requirements.txt
+!README.md
+!.streamlit/config.toml
