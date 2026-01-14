@@ -5,7 +5,6 @@ Simplified version maintaining all original functionality
 
 import streamlit as st
 import pandas as pd
-import hashlib
 from datetime import datetime
 import warnings
 
@@ -41,11 +40,6 @@ def main():
     init_session_state()
     
     try:
-        # Handle authentication
-        if not st.session_state.get('logged_in'):
-            show_login_interface()
-            return
-
         # Region will be auto-detected during upload, so no manual selection needed
         # Initialize region to None if not set (will be populated during data processing)
         if 'region' not in st.session_state:
@@ -83,48 +77,6 @@ def main():
             for key in st.session_state.keys():
                 del st.session_state[key]
             st.rerun()
-
-def show_login_interface():
-    """Show login interface"""
-    st.title("PIT Count Application")
-    st.subheader("Login")
-    
-    with st.form("login_form", clear_on_submit=True):
-        col1, col2 = st.columns([2, 1])
-        
-        with col1:
-            username = st.text_input("Username", placeholder="Enter your username")
-            password = st.text_input("Password", type="password", placeholder="Enter your password")
-        
-        with col2:
-            st.write("")  # Spacing
-            st.write("")  # Spacing
-            submit_button = st.form_submit_button("Login", type="primary", width='stretch')
-        
-        if submit_button:
-            if username and password:
-                if verify_credentials(username, password):
-                    st.session_state['logged_in'] = True
-                    st.session_state['username'] = username
-                    st.success("Login successful!")
-                    st.rerun()
-                else:
-                    st.error("Invalid username or password. Please try again.")
-            else:
-                st.warning("Please enter both username and password.")
-
-def verify_credentials(username, password):
-    """Verify user credentials"""
-    try:
-        users = st.secrets.get("users", {})
-        hashed_password = hashlib.sha256(password.encode()).hexdigest()
-        return users.get(username) == hashed_password
-    except (AttributeError, KeyError, TypeError) as e:
-        st.error(f"Configuration error: Unable to access user credentials. Please contact administrator.")
-        return False
-    except Exception as e:
-        st.error(f"Authentication error: {str(e)}")
-        return False
 
 def show_region_selection():
     """Auto-select New England region (only region available)"""
@@ -197,7 +149,7 @@ def handle_upload_step():
         st.warning("⚠️ Region not detected. Please select your region manually:")
         selected_region = st.selectbox(
             "Select Region:",
-            ['New England', 'Great Lakes'],
+            REGIONS,
             help="Select the region that matches your data format"
         )
         if st.button("✅ Set Region and Continue", type="primary"):

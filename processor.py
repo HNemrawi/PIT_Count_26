@@ -62,41 +62,34 @@ def process_pit_data(df: pd.DataFrame, source_name: str, region: str = None) -> 
     # Step 1: Apply unified column mappings
     df_mapped, mapping_log = apply_column_mapping(df, UNIFIED_COLUMN_MAPPINGS, log_mapping=True)
 
-    # Step 2: Validate name fields for duplication detection
-    name_validation = validate_name_fields_completeness(df_mapped, region)
-    if not name_validation['is_valid']:
-        st.warning("⚠️ Name field validation warnings:")
-        for warning in name_validation['warnings']:
-            st.warning(warning)
-
-    # Step 3: Handle mixed format data (synthesize missing fields if possible)
+    # Step 2: Handle mixed format data (synthesize missing fields if possible)
     df_mapped = handle_mixed_format_data(df_mapped, mapping_log)
 
-    # Step 4: Count age groups
+    # Step 3: Count age groups
     df_mapped = count_age_groups(df_mapped)
 
-    # Step 5: Classify household types
+    # Step 4: Classify household types
     df_mapped = classify_household_type(df_mapped)
 
-    # Step 6: Flatten dataset (create person-level records)
+    # Step 5: Flatten dataset (create person-level records)
     flattened_df = flatten_entire_dataset(df_mapped)
 
-    # Step 7: Flag chronically homeless
+    # Step 6: Flag chronically homeless
     flattened_df = flag_chronically_homeless(flattened_df)
 
-    # Step 8: Add age group column
+    # Step 7: Add age group column
     flattened_df = add_age_group_column(flattened_df)
 
-    # Step 9: Process race
+    # Step 8: Process race
     flattened_df = process_race(flattened_df)
 
-    # Step 10: Process sex (required field)
+    # Step 9: Process sex (required field)
     flattened_df = process_sex(flattened_df)
 
-    # Step 11: Process gender (optional field)
+    # Step 10: Process gender (optional field)
     flattened_df = process_gender(flattened_df)
 
-    # Step 12: Standardize conditions
+    # Step 11: Standardize conditions
     flattened_df = standardize_conditions(flattened_df)
 
     # Add source column
@@ -161,8 +154,13 @@ def apply_column_mapping(df: pd.DataFrame, unified_mapping: Dict[str, List[Tuple
 
     # Check if we have any valid mappings
     if not selected_columns:
-        st.error("No valid columns found after applying unified mapping. "
-                "Please verify your data format matches New England or Great Lakes format.")
+        # Get a sample of expected and found columns for better debugging
+        expected_sample = list(unified_mapping.keys())[:10]
+        found_sample = list(df.columns)[:10]
+        st.error(f"No valid columns found after applying unified mapping.\n\n"
+                f"**Expected columns (sample):** {', '.join(expected_sample)}\n\n"
+                f"**Found columns (sample):** {', '.join(found_sample)}\n\n"
+                f"Please verify your data format matches New England or Great Lakes format.")
         return pd.DataFrame(), mapping_log
 
     # Select and rename columns
@@ -352,27 +350,37 @@ def flatten_entire_dataset(df: pd.DataFrame) -> pd.DataFrame:
 
 def flag_chronically_homeless(df: pd.DataFrame) -> pd.DataFrame:
     """Flag chronically homeless individuals based on criteria"""
-    
-    required_columns = ['homeless_long', 'first_time', 'homeless_long_this_time', 
+
+    required_columns = ['homeless_long', 'first_time', 'homeless_long_this_time',
                        'homeless_times', 'homeless_total', 'disability']
-    
+
     # Check for required columns
     missing_cols = [col for col in required_columns if col not in df.columns]
     if missing_cols:
-        raise ValueError(f"Missing required columns: {', '.join(missing_cols)}")
-    
+        st.warning(f"Missing columns for chronic homelessness calculation: {', '.join(missing_cols)}. Setting all CH to 'No'.")
+        df['CH'] = 'No'
+        return df
+
+    # Fill NaN values to prevent silent failures in conditions
+    df['homeless_long'] = df['homeless_long'].fillna('')
+    df['first_time'] = df['first_time'].fillna('')
+    df['homeless_long_this_time'] = df['homeless_long_this_time'].fillna('')
+    df['homeless_times'] = df['homeless_times'].fillna('')
+    df['homeless_total'] = df['homeless_total'].fillna('')
+    df['disability'] = df['disability'].fillna('No')
+
     # Define chronic homelessness conditions
     cond1 = (df['homeless_long'] == 'One year or more') & (df['first_time'] == 'Yes')
     cond2 = (df['homeless_long_this_time'] == 'One year or more') & (df['first_time'] == 'No')
-    cond3 = ((df['first_time'] == 'No') & 
-             (df['homeless_long_this_time'] == 'Less than one year') & 
-             (df['homeless_times'] == '4 or more times') & 
+    cond3 = ((df['first_time'] == 'No') &
+             (df['homeless_long_this_time'] == 'Less than one year') &
+             (df['homeless_times'] == '4 or more times') &
              (df['homeless_total'] == '12 months or more'))
-    
+
     # Apply conditions with disability requirement
     chronic_homeless_condition = cond1 | cond2 | cond3
     df['CH'] = np.where(chronic_homeless_condition & (df['disability'] == 'Yes'), 'Yes', 'No')
-    
+
     return df
 
 def add_age_group_column(df: pd.DataFrame) -> pd.DataFrame:
@@ -418,9 +426,10 @@ def process_race(df: pd.DataFrame) -> pd.DataFrame:
         # Only Hispanic selected
         if hispanic_selected and len(selected_races) == 1:
             return "Hispanic/Latina/e/o"
-        
+
         if hispanic_selected:
-            selected_races.remove("Hispanic/Latina/e/o")
+            # Use list comprehension to remove all instances (more robust than .remove())
+            selected_races = [r for r in selected_races if r != "Hispanic/Latina/e/o"]
         
         if len(selected_races) > 1:
             return "Multi-Racial & Hispanic/Latina/e/o" if hispanic_selected else "Multi-Racial (not Hispanic/Latina/e/o)"
@@ -516,6 +525,14 @@ def create_households_summary(persons_df: pd.DataFrame) -> pd.DataFrame:
     # Filter columns that exist
     existing_columns = [col for col in household_columns if col in unique_households.columns]
 
+    # Ensure critical columns are in existing columns (defensive check)
+    required = ['Household_ID', 'household_type']
+    missing_required = [col for col in required if col not in existing_columns]
+    if missing_required:
+        import streamlit as st
+        st.error(f"Critical columns missing for household summary: {', '.join(missing_required)}")
+        return pd.DataFrame()
+
     households_df = unique_households[existing_columns].copy()
     
     # Rename Household_ID to household_id for consistency
@@ -528,6 +545,48 @@ def create_households_summary(persons_df: pd.DataFrame) -> pd.DataFrame:
     return households_df
 
 # Duplication Detection Functions
+def map_name_columns_for_duplication(df: pd.DataFrame, region: str = None) -> pd.DataFrame:
+    """
+    Lightweight column mapping that only maps name fields for duplication detection.
+
+    This function applies column mapping to convert raw column names to standardized
+    names expected by the DuplicationDetector, without performing full data processing.
+
+    Args:
+        df: Input DataFrame with raw column names
+        region: Region name (optional, will auto-detect if not provided)
+
+    Returns:
+        DataFrame with name columns mapped to standardized names
+    """
+    from utils import detect_region_and_format
+
+    # Auto-detect region if not provided
+    if region is None:
+        detection_result = detect_region_and_format(df)
+        region = detection_result.get('region')
+
+    # Create a subset mapping with only name-related fields
+    name_field_keys = [
+        'first_initial', 'last_initial', 'last_third',  # New England
+        'first_name', 'first_letter_last', 'last_name',  # Great Lakes
+        'dob', 'age', 'age_range'  # Age-related for duplication logic
+    ]
+
+    # Filter UNIFIED_COLUMN_MAPPINGS to only include name fields
+    name_mappings = {k: v for k, v in UNIFIED_COLUMN_MAPPINGS.items() if k in name_field_keys}
+
+    # Apply column mapping (without logging to avoid cluttering UI)
+    df_mapped, _ = apply_column_mapping(df, name_mappings, log_mapping=False)
+
+    # Preserve all unmapped columns from the original dataframe
+    # This ensures we don't lose any data that might be needed
+    for col in df.columns:
+        if col not in df_mapped.columns:
+            df_mapped[col] = df[col]
+
+    return df_mapped
+
 def detect_duplicates(df: pd.DataFrame, source_name: str, region: str) -> pd.DataFrame:
     """
     Detect potential duplicates in the data using hierarchical matching.
@@ -568,10 +627,13 @@ class DuplicationDetector:
         self.source_name = source_name
         self.region = region
         self._prepare_name_fields()
-        
+
         # Track matches
         self.high_confidence_matches = set()
         self.medium_confidence_matches = set()
+
+        # Validate region matches detected format
+        self._validate_region_format()
     
     def _safe_str(self, value: Any) -> str:
         """Convert to uppercase string safely"""
@@ -619,16 +681,18 @@ class DuplicationDetector:
         """
         Prepare name fields based on available columns (auto-detected format).
 
-        Supports four formats:
-        1. New England: 1st letter first name + 1st & 3rd letters last name (3-letter code)
-        2. Great Lakes Option A: First Name + First Letter of Last Name (hybrid)
-        3. Great Lakes Option B: First Name + Last Name (full names)
-        4. Fallback: Use whatever is available, warn if incomplete
+        Supports five formats:
+        1. New England Complete: 1st letter first name + 1st & 3rd letters last name (3-letter code)
+        2. New England Partial: 1st letter first name + 1st letter last name (2-letter code)
+        3. Great Lakes Option A: First Name + First Letter of Last Name (hybrid)
+        4. Great Lakes Option B: First Name + Last Name (full names)
+        5. Fallback: Use whatever is available, warn if incomplete
         """
         df = self.data
 
         # Detect which name format is present in the data
-        has_ne_format = all(col in df.columns for col in ['first_initial', 'last_initial', 'last_third'])
+        has_ne_complete = all(col in df.columns for col in ['first_initial', 'last_initial', 'last_third'])
+        has_ne_partial = ('first_initial' in df.columns and 'last_initial' in df.columns and not has_ne_complete)
         # GL can use either 'first_letter_last' (new mapping) or 'last_initial' (legacy)
         has_gl_option_a = ('first_name' in df.columns and
                           ('first_letter_last' in df.columns or 'last_initial' in df.columns) and
@@ -637,8 +701,8 @@ class DuplicationDetector:
         has_first_name = 'first_name' in df.columns
         has_last_initial = 'last_initial' in df.columns or 'first_letter_last' in df.columns
 
-        if has_ne_format:
-            # Format 1: New England - 3-letter code (e.g., "ABC")
+        if has_ne_complete:
+            # Format 1: New England Complete - 3-letter code (e.g., "ABC")
             df["_p1"] = df["first_initial"].apply(self._safe_str)
             df["_p2"] = df["last_initial"].apply(self._safe_str)
             df["_p3"] = df["last_third"].apply(self._safe_str)
@@ -651,8 +715,23 @@ class DuplicationDetector:
                 axis=1
             )
 
+        elif has_ne_partial:
+            # Format 2: New England Partial - 2-letter code (e.g., "AB")
+            # 3rd letter of last name not collected for all clients
+            df["_p1"] = df["first_initial"].apply(self._safe_str)
+            df["_p2"] = df["last_initial"].apply(self._safe_str)
+            df["_p3"] = ""  # Not available
+            df["_full_name"] = df.apply(
+                lambda r: "".join([r["_p1"], r["_p2"]]),
+                axis=1
+            )
+            df["_initials"] = df.apply(
+                lambda r: "".join([r["_p1"][:1], r["_p2"][:1]]),
+                axis=1
+            )
+
         elif has_gl_option_b:
-            # Format 2: Great Lakes Option B - "FirstName LastName" (full names)
+            # Format 3: Great Lakes Option B - "FirstName LastName" (full names)
             # Check this before Option A since last_name is more complete
             df["_p1"] = df["first_name"].apply(self._safe_str)
             df["_p2"] = df["last_name"].apply(self._safe_str)
@@ -666,7 +745,7 @@ class DuplicationDetector:
             )
 
         elif has_gl_option_a:
-            # Format 3: Great Lakes Option A - "FirstName L" (first name + last initial)
+            # Format 4: Great Lakes Option A - "FirstName L" (first name + last initial)
             df["_p1"] = df["first_name"].apply(self._safe_str)
             # Use first_letter_last if available, otherwise fall back to last_initial
             last_col = 'first_letter_last' if 'first_letter_last' in df.columns else 'last_initial'
@@ -681,7 +760,7 @@ class DuplicationDetector:
             )
 
         elif has_first_name and has_last_initial:
-            # Format 4a: Partial - First name + last initial (synthesized from mixed format)
+            # Format 5: Partial - First name + last initial (synthesized from mixed format)
             df["_p1"] = df["first_name"].apply(self._safe_str)
             # Use first_letter_last if available, otherwise fall back to last_initial
             last_col = 'first_letter_last' if 'first_letter_last' in df.columns else 'last_initial'
@@ -696,9 +775,9 @@ class DuplicationDetector:
             )
 
         else:
-            # Format 4b: Fallback - Incomplete or no name data
-            import streamlit as st
-            st.warning("⚠️ Incomplete or missing name data detected. Duplication detection may be less accurate.")
+            # Format 6: Fallback - No name data
+            # Records will be marked as "No Name" and highlighted in purple
+            # No warning needed - this is handled gracefully
             df["_p1"] = ""
             df["_p2"] = ""
             df["_p3"] = ""
@@ -706,37 +785,195 @@ class DuplicationDetector:
             df["_initials"] = ""
 
         df["_is_no_name"] = df["_full_name"] == ""
-    
+
+    def _validate_region_format(self):
+        """
+        Validate that the selected region matches the detected name format.
+
+        Displays a warning if mismatch is detected, which could indicate:
+        - Wrong region selected by user
+        - Data from different region uploaded
+        - Missing expected columns
+
+        This helps catch configuration errors early.
+
+        Note: Does not warn if all records have no name data (handled gracefully with purple highlighting).
+        """
+        import streamlit as st
+
+        # Check if all records have no name data - if so, skip validation
+        # This is okay and will be handled with purple highlighting
+        if (self.data["_full_name"] == "").all():
+            return  # All records have no name - this is fine, skip validation
+
+        # Detect which name formats are present
+        ne_columns = ['first_initial', 'last_initial', 'last_third']
+        has_any_ne_column = any(col in self.data.columns for col in ne_columns)
+
+        has_first_name = 'first_name' in self.data.columns
+        has_last_letter = 'first_letter_last' in self.data.columns
+        has_last_name = 'last_name' in self.data.columns
+
+        # Validate New England region - need at least ONE of the 3 columns
+        if self.region == "New England":
+            if not has_any_ne_column:
+                st.warning(
+                    f"⚠️ Region set to **New England** but name format doesn't match.\n\n"
+                    f"Expected at least one of: `first_initial`, `last_initial`, `last_third`\n\n"
+                    f"Duplication detection may not work as expected."
+                )
+
+        # Validate Great Lakes region - need first_name + (first_letter_last OR last_name)
+        elif self.region == "Great Lakes":
+            if not (has_first_name and (has_last_letter or has_last_name)):
+                st.warning(
+                    f"⚠️ Region set to **Great Lakes** but name format doesn't match.\n\n"
+                    f"Expected columns: `first_name` + `first_letter_last` OR `first_name` + `last_name`\n\n"
+                    f"Duplication detection may not work as expected."
+                )
+
     def _compare_pair(self, i: int, j: int) -> Tuple[str, str]:
         """
-        Compare two records for duplication.
-        
-        Uses hierarchical matching:
-        1. High confidence: Name/initials + DOB or exact age
-        2. Medium confidence: Initials + age or name + age range
-        3. Low confidence: Initials + age range
+        Compare two records for duplication using region-specific rules.
+
+        Routes to region-specific comparison methods based on self.region:
+        - New England: Simplified 3-rule hierarchy (no initials matching)
+        - Great Lakes: Expanded 6-rule hierarchy (includes initials)
+        - Other: Universal hierarchy (fallback)
         """
         r1, r2 = self.data.iloc[i], self.data.iloc[j]
-        
+        pair = (min(i, j), max(i, j))
+
+        # Check for no name information - flag but don't match
+        if not r1["_full_name"] or not r2["_full_name"]:
+            return "Not Duplicate", ""
+
+        # Route to region-specific comparison
+        if self.region == "New England":
+            return self._compare_pair_new_england(r1, r2, pair)
+        elif self.region == "Great Lakes":
+            return self._compare_pair_great_lakes(r1, r2, pair)
+        else:
+            # Fallback to universal hierarchy for unknown regions
+            return self._compare_pair_universal(r1, r2, pair)
+
+    def _compare_pair_new_england(self, r1, r2, pair: tuple) -> Tuple[str, str]:
+        """
+        New England duplication rules.
+
+        Hierarchy:
+        - Likely: Full Name (3-letter code) + DOB
+        - Somewhat Likely: Full Name (3-letter code) + Age
+        - Possible: Full Name (3-letter code) + Age Range
+
+        Note: New England uses 3-letter codes (first_initial + last_initial + last_third)
+        and does NOT use initials-based matching.
+        """
         # Extract fields
         f1, f2 = r1["_full_name"], r2["_full_name"]
-        if not f1 or not f2:
-            return "Not Duplicate", ""
-        
-        init1, init2 = r1["_initials"], r2["_initials"]
-        # Try both column name formats (flattened uses lowercase with underscores)
         dob1 = self.parse_dob(r1.get("dob") or r1.get("Date of Birth"))
         dob2 = self.parse_dob(r2.get("dob") or r2.get("Date of Birth"))
         age1 = self._safe_int(r1.get("age") or r1.get("Age"))
         age2 = self._safe_int(r2.get("age") or r2.get("Age"))
         rng1 = r1.get("age_range") or r1.get("Age Range")
         rng2 = r2.get("age_range") or r2.get("Age Range")
-        
-        # Track pair
-        pair = (min(i, j), max(i, j))
-        
-        # Check for matches
-        # 1) LIKELY DUPLICATES (High Confidence)
+
+        # LIKELY: Full Name + DOB
+        if f1 == f2 and dob1 and dob2 and dob1 == dob2:
+            self.high_confidence_matches.add(pair)
+            return "Likely Duplicate 🔴", "Full name and DOB match"
+
+        # SOMEWHAT LIKELY: Full Name + Age
+        if pair not in self.high_confidence_matches:
+            if f1 == f2 and age1 is not None and age2 is not None and age1 == age2:
+                self.medium_confidence_matches.add(pair)
+                return "Somewhat Likely Duplicate 🟠", "Full name and age match"
+
+        # POSSIBLE: Full Name + Age Range
+        if pair not in self.high_confidence_matches and pair not in self.medium_confidence_matches:
+            if f1 == f2 and rng1 and rng2 and rng1 == rng2:
+                return "Possible Duplicate 🟡", "Full name and age range match"
+
+        return "Not Duplicate", ""
+
+    def _compare_pair_great_lakes(self, r1, r2, pair: tuple) -> Tuple[str, str]:
+        """
+        Great Lakes duplication rules.
+
+        Hierarchy:
+        - Likely: Full Name + DOB, Full Name + Age, Initials + DOB
+        - Somewhat Likely: Full Name + Age Range, Initials + Age
+        - Possible: Initials + Age Range
+
+        Note: Great Lakes uses full names (first_name + first_letter_of_last_name or last_name)
+        and includes initials-based matching for lower confidence levels.
+        """
+        # Extract fields
+        f1, f2 = r1["_full_name"], r2["_full_name"]
+        init1, init2 = r1["_initials"], r2["_initials"]
+        dob1 = self.parse_dob(r1.get("dob") or r1.get("Date of Birth"))
+        dob2 = self.parse_dob(r2.get("dob") or r2.get("Date of Birth"))
+        age1 = self._safe_int(r1.get("age") or r1.get("Age"))
+        age2 = self._safe_int(r2.get("age") or r2.get("Age"))
+        rng1 = r1.get("age_range") or r1.get("Age Range")
+        rng2 = r2.get("age_range") or r2.get("Age Range")
+
+        # LIKELY: Full Name + DOB
+        if f1 == f2 and dob1 and dob2 and dob1 == dob2:
+            self.high_confidence_matches.add(pair)
+            return "Likely Duplicate 🔴", "Full name and DOB match"
+
+        # LIKELY: Full Name + Age
+        if f1 == f2 and age1 is not None and age2 is not None and age1 == age2:
+            self.high_confidence_matches.add(pair)
+            return "Likely Duplicate 🔴", "Full name and age match"
+
+        # LIKELY: Initials + DOB
+        if init1 == init2 and dob1 and dob2 and dob1 == dob2:
+            self.high_confidence_matches.add(pair)
+            return "Likely Duplicate 🔴", "Initials and DOB match"
+
+        # SOMEWHAT LIKELY: Full Name + Age Range
+        if pair not in self.high_confidence_matches:
+            if f1 == f2 and rng1 and rng2 and rng1 == rng2:
+                self.medium_confidence_matches.add(pair)
+                return "Somewhat Likely Duplicate 🟠", "Full name and age range match"
+
+        # SOMEWHAT LIKELY: Initials + Age
+        if pair not in self.high_confidence_matches:
+            if init1 == init2 and age1 is not None and age2 is not None and age1 == age2:
+                self.medium_confidence_matches.add(pair)
+                return "Somewhat Likely Duplicate 🟠", "Initials and age match"
+
+        # POSSIBLE: Initials + Age Range
+        if pair not in self.high_confidence_matches and pair not in self.medium_confidence_matches:
+            if init1 == init2 and rng1 and rng2 and rng1 == rng2:
+                return "Possible Duplicate 🟡", "Initials and age range match"
+
+        return "Not Duplicate", ""
+
+    def _compare_pair_universal(self, r1, r2, pair: tuple) -> Tuple[str, str]:
+        """
+        Universal duplication rules (fallback for unknown regions).
+
+        Uses the original hierarchy that worked for all regions before region-specific rules:
+        - Likely: Full Name + DOB, Initials + DOB, Full Name + Age
+        - Somewhat Likely: Initials + Age, Full Name + Age Range
+        - Possible: Initials + Age Range
+
+        This preserves backward compatibility for regions without specific rules.
+        """
+        # Extract fields
+        f1, f2 = r1["_full_name"], r2["_full_name"]
+        init1, init2 = r1["_initials"], r2["_initials"]
+        dob1 = self.parse_dob(r1.get("dob") or r1.get("Date of Birth"))
+        dob2 = self.parse_dob(r2.get("dob") or r2.get("Date of Birth"))
+        age1 = self._safe_int(r1.get("age") or r1.get("Age"))
+        age2 = self._safe_int(r2.get("age") or r2.get("Age"))
+        rng1 = r1.get("age_range") or r1.get("Age Range")
+        rng2 = r2.get("age_range") or r2.get("Age Range")
+
+        # LIKELY: DOB matches
         if dob1 and dob2 and dob1 == dob2:
             if f1 == f2:
                 self.high_confidence_matches.add(pair)
@@ -744,32 +981,33 @@ class DuplicationDetector:
             if init1 == init2:
                 self.high_confidence_matches.add(pair)
                 return "Likely Duplicate 🔴", "Initials and DOB match"
-        
+
+        # LIKELY: Full Name + Age
         if age1 is not None and age2 is not None and age1 == age2:
             if f1 == f2:
                 self.high_confidence_matches.add(pair)
                 return "Likely Duplicate 🔴", "Full name and age match"
-        
-        # 2) SOMEWHAT LIKELY (Medium Confidence)
+
+        # SOMEWHAT LIKELY
         if pair not in self.high_confidence_matches:
             if age1 is not None and age2 is not None and age1 == age2:
                 if init1 == init2:
                     self.medium_confidence_matches.add(pair)
                     return "Somewhat Likely Duplicate 🟠", "Initials and age match"
-            
+
             if rng1 and rng2 and rng1 == rng2:
                 if f1 == f2:
                     self.medium_confidence_matches.add(pair)
                     return "Somewhat Likely Duplicate 🟠", "Full name and age range match"
-        
-        # 3) POSSIBLE (Low Confidence)
+
+        # POSSIBLE
         if pair not in self.high_confidence_matches and pair not in self.medium_confidence_matches:
             if rng1 and rng2 and rng1 == rng2:
                 if init1 == init2:
                     return "Possible Duplicate 🟡", "Initials and age range match"
-        
+
         return "Not Duplicate", ""
-    
+
     def annotate(self) -> pd.DataFrame:
         """
         Annotate dataframe with duplication scores.
@@ -843,13 +1081,26 @@ class DuplicationDetector:
     def create_excel_with_highlights(self, annotated_df: pd.DataFrame) -> BytesIO:
         """
         Export to Excel with visual formatting.
-        
+
         Features:
+        - Preserves original data columns in original order
+        - Adds duplication columns at the end
         - Color-coded rows based on duplication score
         - Formatted header row
         - Auto-adjusted column widths
         - Duplicates_With indices adjusted for Excel (zero-based → 1-based starting at row 2)
         """
+        # Create merged dataframe: original data + duplication columns
+        # Get original columns (stored in self.data before name field preparation)
+        original_cols = [col for col in self.data.columns if not col.startswith('_')]
+        dup_cols = ['Duplication_Score', 'Duplication_Reason', 'Duplicates_With']
+
+        # Reorder: original columns first, then duplication columns
+        export_df = annotated_df[original_cols + dup_cols].copy()
+
+        # Reset index to ensure continuous 0-based indexing for row number calculations
+        export_df = export_df.reset_index(drop=True)
+
         wb = Workbook()
         ws = wb.active
         ws.title = self.source_name
@@ -864,7 +1115,7 @@ class DuplicationDetector:
         }
 
         # Style header row
-        for ci, col in enumerate(annotated_df.columns, start=1):
+        for ci, col in enumerate(export_df.columns, start=1):
             cell = ws.cell(row=1, column=ci, value=col)
             cell.fill = PatternFill(start_color="366092", fill_type="solid")
             cell.font = Font(bold=True, color="FFFFFF")
@@ -872,12 +1123,12 @@ class DuplicationDetector:
 
         # Add data with row highlighting
         # Get Duplication_Score column index
-        score_col_idx = annotated_df.columns.get_loc("Duplication_Score") if "Duplication_Score" in annotated_df.columns else None
+        score_col_idx = export_df.columns.get_loc("Duplication_Score") if "Duplication_Score" in export_df.columns else None
 
-        for r_idx, record in enumerate(annotated_df.itertuples(index=False), start=2):
+        for r_idx, record in enumerate(export_df.itertuples(index=False), start=2):
             row_score = None
             for ci, val in enumerate(record, start=1):
-                col_name = annotated_df.columns[ci - 1]
+                col_name = export_df.columns[ci - 1]
 
                 # Track duplication score
                 if score_col_idx is not None and ci == score_col_idx + 1:
@@ -888,8 +1139,11 @@ class DuplicationDetector:
                     shifted_indices = []
                     for part in val.split(","):
                         try:
-                            # Convert 0-based to Excel row (starting at 2)
-                            shifted_indices.append(str(int(part) + 2))
+                            idx = int(part)
+                            # Bounds check: ensure index is valid
+                            if 0 <= idx < len(export_df):
+                                # Convert 0-based to Excel row (starting at 2)
+                                shifted_indices.append(str(idx + 2))
                         except ValueError:
                             continue
                     ws.cell(row=r_idx, column=ci, value=",".join(shifted_indices))
@@ -899,7 +1153,7 @@ class DuplicationDetector:
             # Apply row color based on duplication score
             color = score_colors.get(row_score, "FFFFFF") if row_score else "FFFFFF"
             fill = PatternFill(start_color=color, fill_type="solid")
-            for ci in range(1, len(annotated_df.columns) + 1):
+            for ci in range(1, len(export_df.columns) + 1):
                 ws.cell(row=r_idx, column=ci).fill = fill
 
         # Auto-adjust column widths

@@ -15,7 +15,7 @@ from openpyxl.styles import NamedStyle, Font, Alignment, PatternFill
 
 
 from config import VALID_AGE_RANGES, VALID_GENDERS, VALID_RACES
-from processor import detect_duplicates, validate_data
+from processor import detect_duplicates, validate_data, map_name_columns_for_duplication
 from utils import get_timezone_for_region, create_download_filename, get_current_timestamp, safe_dataframe_display
 
 def show_upload_interface():
@@ -277,47 +277,81 @@ def show_duplication_interface(uploaded_data, region):
     st.subheader("🔍 Duplication Detection")
     
     with st.expander("ℹ️ How Duplication Detection Works", expanded=False):
-        st.markdown("""
-        ### Detection Logic
-        
-        The system uses a **comprehensive hierarchical matching approach** to identify potential duplicates:
-        
-        1. **🔴 Likely Duplicates (High Confidence)**
-           - Full name + Date of Birth match
-           - Initials + Date of Birth match
-           - Full name + exact age match
-        
-        2. **🟠 Somewhat Likely (Medium Confidence)**
-           - Initials + exact age match
-           - Full name + age range match (checked for ALL records)
-        
-        3. **🟡 Possible Duplicates (Low Confidence)**
-           - Initials + age range match
-        
-        4. **🟣 No Name Information**
-           - Records missing name data cannot be evaluated
-        
-        ### Key Features
-        
-        - **Comprehensive Checking**: Age range is ALWAYS checked, ensuring no potential matches are missed
-        - **Hierarchical Priority**: Higher confidence matches take precedence
-        - **No Downgrading**: Once matched at a high level, records won't be reclassified lower
-        
-        ### Regional Differences
+        st.markdown(f"""
+        ### Detection Logic (Current Region: {region})
 
-        Different regions use different name formats:
-        - **New England**: 1st letter of first name + 1st & 3rd letters of last name
-        - **Other regions**: Full first and last names
+        The system uses **region-specific hierarchical matching** to identify potential duplicates.
+        Higher priority rules override lower ones - if a pair matches a "Likely" condition,
+        it won't be downgraded even if it also matches "Somewhat Likely" or "Possible" conditions.
+
+        ---
+
+        ### New England Rules
+        *Uses 3-letter name codes: 1st letter of first name + 1st & 3rd letters of last name*
+
+        | Color | Confidence Level | Matching Conditions |
+        |-------|-----------------|---------------------|
+        | 🔴 | **Likely Duplicate** | Full Name (3-letter code) + DOB match |
+        | 🟠 | **Somewhat Likely** | Full Name (3-letter code) + Age match |
+        | 🟡 | **Possible Duplicate** | Full Name (3-letter code) + Age Range match |
+        | 🟣 | **No Name Info** | Record has no name information (not matched) |
+
+        **Name Format Example:** "John Smith" → "JSI" (J + S + I, where I is 3rd letter of Smith)
+
+        ---
+
+        ### Great Lakes Rules
+        *Uses full names (First Name + Last Name) and initials*
+
+        | Color | Confidence Level | Matching Conditions |
+        |-------|-----------------|---------------------|
+        | 🔴 | **Likely Duplicate** | Full Name + DOB match |
+        | 🔴 | **Likely Duplicate** | Full Name + Age match |
+        | 🔴 | **Likely Duplicate** | Initials + DOB match |
+        | 🟠 | **Somewhat Likely** | Full Name + Age Range match |
+        | 🟠 | **Somewhat Likely** | Initials + Age match |
+        | 🟡 | **Possible Duplicate** | Initials + Age Range match |
+        | 🟣 | **No Name Info** | Record has no name information (not matched) |
+
+        **Name Format Example:** "John Smith" → Full name: "JOHN SMITH", Initials: "JS"
+
+        ---
+
+        ### Key Differences Between Regions
+
+        | Feature | New England | Great Lakes |
+        |---------|-------------|-------------|
+        | Name Format | 3-letter code | Full names |
+        | Initials Matching | Not used | Used for all confidence levels |
+        | Full Name + Age | Somewhat Likely | Likely |
+        | Matching Strictness | More strict (fewer rules) | More comprehensive (more rules) |
+
+        ---
+
+        ### Important Notes
+
+        - **Hierarchy Enforcement**: Higher confidence matches prevent downgrading to lower confidence
+        - **No Name Records**: Records without name information are flagged with 🟣 but not compared
+        - **Heads of Household**: Comparison focuses on heads of household information
+        - **Data Priority**: DOB is preferred over Age; Age is preferred over Age Range
+
+        ### Excel Export
+
+        - Color-coded rows (red/orange/yellow/purple)
+        - "Duplicates_With" column shows Excel row numbers (starting at row 2)
+        - "Duplication_Reason" explains why records matched
         """)
     
     if st.button("🚀 Run Duplication Detection", type="primary"):
         with st.spinner("Analyzing records..."):
             results = {}
-            
+
             for source_name, df in uploaded_data.items():
-                annotated = detect_duplicates(df, source_name, region)
+                # Map name columns before detection to ensure standardized format
+                df_with_mapped_names = map_name_columns_for_duplication(df, region)
+                annotated = detect_duplicates(df_with_mapped_names, source_name, region)
                 results[source_name] = annotated
-            
+
             st.session_state['dup_results'] = results
             st.success("✅ Detection complete!")
     
@@ -398,13 +432,63 @@ def show_duplication_interface(uploaded_data, region):
 def show_data_validation_interface(uploaded_data, region):
     """Show data validation interface"""
     st.subheader("✅ Data Validation")
-    
-    st.info("""
-    **Validation Checks:**
-    - Age Range values
-    - Gender categories
-    - Race/Ethnicity categories
-    """)
+
+    with st.expander("ℹ️ About Data Validation", expanded=False):
+        st.markdown("""
+        ### Validation Rules
+
+        The system validates the following data fields:
+
+        #### 🔢 Age Range (Single-Select)
+        - **Valid Values**: Under 18, 18-24, 25-34, 35-44, 45-54, 55-64, 65+
+        - **Applies To**: All age range columns (HOH + additional adults)
+        - **Empty Values**: Allowed (skipped in validation)
+
+        #### 👤 Sex (Single-Select, Required)
+        - **Valid Values**: Male, Female
+        - **Applies To**: All sex columns (HOH + additional adults + children)
+        - **Empty Values**: Flagged as invalid
+
+        #### 🎭 Gender (Multi-Select, Optional)
+        - **Valid Values**: Man, Woman, Non-Binary, Transgender, Questioning, Different Identity
+        - **Applies To**: All gender columns (HOH + additional adults + children)
+        - **Format**: Comma-separated for multiple selections (e.g., "Woman, Transgender")
+        - **Empty Values**: Allowed (optional field)
+        - **Note**: Gender columns may not exist in all datasets - this is acceptable
+
+        #### 🌍 Race/Ethnicity (Multi-Select)
+        - **Valid Values**:
+          - American Indian, Alaska Native, or Indigenous
+          - Asian or Asian American
+          - Black, African American, or African
+          - Hispanic/Latina/e/o
+          - Middle Eastern or North African
+          - Native Hawaiian or Pacific Islander
+          - White
+          - Client Doesn't Know
+          - Client Prefers Not to Answer
+          - Data Not Collected
+        - **Format**: Comma-separated for multiple selections
+        - **Empty Values**: Allowed (skipped in validation)
+
+        ### How Validation Works
+
+        1. **Run Validation** button scans all uploaded data sources
+        2. Invalid entries are flagged with their Excel row numbers
+        3. Results show the invalid value and list of valid options
+        4. Download options available for each issue type and complete reports
+
+        ### What Gets Flagged
+
+        - **Typos**: "Mal" instead of "Male"
+        - **Extra Spaces**: " Male " with leading/trailing spaces
+        - **Wrong Format**: "Male,Female" in a single-select field
+        - **Invalid Options**: Values not in the approved list
+        - **Required Fields**: Missing sex values (when column exists)
+        """)
+
+    st.info("Click **Run Validation** to check all uploaded data for invalid entries.")
+
     
     if st.button("🔍 Run Validation", type="primary", key="validate_btn"):
         all_results = {}
@@ -430,68 +514,173 @@ def show_data_validation_interface(uploaded_data, region):
             st.success("✅ No validation issues found!")
             return
         
-        # Create summary metrics
+        # Create comprehensive summary metrics
         total_issues = sum(sum(len(df) for df in source_results.values()) for source_results in results.values())
-        col1, col2, col3 = st.columns(3)
+
+        # Count by type across all sources
+        all_age_issues = sum(len(df) for source_results in results.values()
+                            for k, df in source_results.items() if k.startswith('age_'))
+        all_sex_issues = sum(len(df) for source_results in results.values()
+                            for k, df in source_results.items() if k.startswith('sex_'))
+        all_gender_issues = sum(len(df) for source_results in results.values()
+                               for k, df in source_results.items() if k.startswith('gender_'))
+        all_race_issues = sum(len(df) for source_results in results.values()
+                             for k, df in source_results.items() if k.startswith('race_'))
+
+        # Top row metrics
+        col1, col2, col3, col4 = st.columns(4)
         with col1:
-            st.metric("Total Issues", total_issues)
+            st.metric("Total Issues", f"{total_issues:,}")
         with col2:
             st.metric("Sources with Issues", len(results))
         with col3:
+            st.metric("Most Common",
+                     "🔢 Age" if all_age_issues >= max(all_sex_issues, all_gender_issues, all_race_issues)
+                     else "👤 Sex" if all_sex_issues >= max(all_age_issues, all_gender_issues, all_race_issues)
+                     else "🎭 Gender" if all_gender_issues >= max(all_age_issues, all_sex_issues, all_race_issues)
+                     else "🌍 Race")
+        with col4:
             st.metric("Status", "⚠️ Needs Review")
-        
+
+        # Second row - breakdown by type
+        col1, col2, col3, col4 = st.columns(4)
+        with col1:
+            st.metric("🔢 Age Issues", all_age_issues)
+        with col2:
+            st.metric("👤 Sex Issues", all_sex_issues)
+        with col3:
+            st.metric("🎭 Gender Issues", all_gender_issues)
+        with col4:
+            st.metric("🌍 Race Issues", all_race_issues)
+
         st.write("---")
+
+        # Download all issues across all sources as Excel
+        if total_issues > 0:
+            from io import BytesIO
+            from openpyxl import Workbook
+            from openpyxl.styles import Font, PatternFill, Alignment
+
+            # Create workbook with separate sheets per source
+            excel_buffer = BytesIO()
+            with pd.ExcelWriter(excel_buffer, engine='openpyxl') as writer:
+                for source_name, validation_results in results.items():
+                    if validation_results:
+                        all_issues_df = pd.concat(validation_results.values(), ignore_index=True)
+                        # Sort by Row number for easier navigation
+                        all_issues_df = all_issues_df.sort_values('Row')
+                        all_issues_df.to_excel(writer, sheet_name=source_name[:31], index=False)
+
+            excel_buffer.seek(0)
+            st.download_button(
+                "📥 Download All Validation Issues (Excel)",
+                data=excel_buffer.getvalue(),
+                file_name=f"validation_issues_{region}_{pd.Timestamp.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                key="download_all_validation_excel",
+                help="Download all validation issues across all sources as an Excel file"
+            )
+
+            st.write("---")
         
         for source_name, validation_results in results.items():
             source_issues = sum(len(df) for df in validation_results.values())
-            
+
+            # Group by type
+            age_issues = {k: v for k, v in validation_results.items() if k.startswith('age_')}
+            sex_issues = {k: v for k, v in validation_results.items() if k.startswith('sex_')}
+            gender_issues = {k: v for k, v in validation_results.items() if k.startswith('gender_')}
+            race_issues = {k: v for k, v in validation_results.items() if k.startswith('race_')}
+
+            # Count issues by type for this source
+            age_count = sum(len(df) for df in age_issues.values())
+            sex_count = sum(len(df) for df in sex_issues.values())
+            gender_count = sum(len(df) for df in gender_issues.values())
+            race_count = sum(len(df) for df in race_issues.values())
+
             with st.expander(f"📋 {source_name} - {source_issues} issues", expanded=True):
-                # Group by type
-                age_issues = {k: v for k, v in validation_results.items() if k.startswith('age_')}
-                gender_issues = {k: v for k, v in validation_results.items() if k.startswith('gender_')}
-                race_issues = {k: v for k, v in validation_results.items() if k.startswith('race_')}
-                
+                # Summary for this source - only show categories that exist in data
+                breakdown_lines = [
+                    f"- 🔢 Age Range: {age_count} issues",
+                    f"- 👤 Sex: {sex_count} issues"
+                ]
+
+                # Only show Gender if any Gender columns exist in the dataset
+                has_gender_columns = any('Gender' in col for col in uploaded_data[source_name].columns)
+                if has_gender_columns:
+                    breakdown_lines.append(f"- 🎭 Gender: {gender_count} issues")
+
+                breakdown_lines.append(f"- 🌍 Race/Ethnicity: {race_count} issues")
+
+                st.markdown("**Issue Breakdown:**\n" + "\n".join(breakdown_lines))
+
+                st.write("---")
+
                 # Age Range Issues
                 if age_issues:
                     st.write("### 🔢 Age Range Issues")
                     for key, df in age_issues.items():
                         if not df.empty:
                             column_name = df['Column'].iloc[0]
-                            st.write(f"**{column_name}** - {len(df)} invalid entries")
-                            
+                            st.write(f"**{column_name}** ({len(df)} invalid entries)")
+
                             # Show detailed table
                             display_df = df[['Row', 'Value', 'Valid_Options']].copy()
                             display_df['Row'] = display_df['Row'].apply(lambda x: f"Row {x}")
-                            st.dataframe(display_df, width='stretch', height=min(200, len(df) * 35 + 50))
-                            
+                            st.dataframe(display_df, use_container_width=True, height=min(300, len(df) * 35 + 50))
+
                             # Download option for this specific issue
                             csv = df.to_csv(index=False)
                             st.download_button(
-                                f"📥 Download {column_name} issues",
+                                f"📥 Download CSV",
                                 data=csv,
                                 file_name=f"{source_name}_{column_name.replace(' ', '_')}_issues.csv",
                                 mime="text/csv",
                                 key=f"dl_{source_name}_{key}"
                             )
                             st.write("---")
-                
-                # Gender Issues
-                if gender_issues:
-                    st.write("### 👤 Gender Issues")
-                    for key, df in gender_issues.items():
+
+                # Sex Issues
+                if sex_issues:
+                    st.write("### 👤 Sex Issues (Required Field)")
+                    for key, df in sex_issues.items():
                         if not df.empty:
                             column_name = df['Column'].iloc[0]
-                            st.write(f"**{column_name}** - {len(df)} invalid entries")
-                            
+                            st.write(f"**{column_name}** ({len(df)} invalid entries)")
+
                             # Show detailed table
                             display_df = df[['Row', 'Value', 'Invalid_Parts', 'Valid_Options']].copy()
                             display_df['Row'] = display_df['Row'].apply(lambda x: f"Row {x}")
-                            st.dataframe(display_df, width='stretch', height=min(200, len(df) * 35 + 50))
-                            
+                            st.dataframe(display_df, use_container_width=True, height=min(300, len(df) * 35 + 50))
+
                             # Download option
                             csv = df.to_csv(index=False)
                             st.download_button(
-                                f"📥 Download {column_name} issues",
+                                f"📥 Download CSV",
+                                data=csv,
+                                file_name=f"{source_name}_{column_name.replace(' ', '_')}_issues.csv",
+                                mime="text/csv",
+                                key=f"dl_{source_name}_{key}"
+                            )
+                            st.write("---")
+
+                # Gender Issues
+                if gender_issues:
+                    st.write("### 🎭 Gender Issues (Optional Field)")
+                    for key, df in gender_issues.items():
+                        if not df.empty:
+                            column_name = df['Column'].iloc[0]
+                            st.write(f"**{column_name}** ({len(df)} invalid entries)")
+
+                            # Show detailed table
+                            display_df = df[['Row', 'Value', 'Invalid_Parts', 'Valid_Options']].copy()
+                            display_df['Row'] = display_df['Row'].apply(lambda x: f"Row {x}")
+                            st.dataframe(display_df, use_container_width=True, height=min(300, len(df) * 35 + 50))
+
+                            # Download option
+                            csv = df.to_csv(index=False)
+                            st.download_button(
+                                f"📥 Download CSV",
                                 data=csv,
                                 file_name=f"{source_name}_{column_name.replace(' ', '_')}_issues.csv",
                                 mime="text/csv",
@@ -505,36 +694,39 @@ def show_data_validation_interface(uploaded_data, region):
                     for key, df in race_issues.items():
                         if not df.empty:
                             column_name = df['Column'].iloc[0]
-                            st.write(f"**{column_name}** - {len(df)} invalid entries")
-                            
+                            st.write(f"**{column_name}** ({len(df)} invalid entries)")
+
                             # Show detailed table
                             display_df = df[['Row', 'Value', 'Invalid_Parts', 'Valid_Options']].copy()
                             display_df['Row'] = display_df['Row'].apply(lambda x: f"Row {x}")
-                            st.dataframe(display_df, width='stretch', height=min(200, len(df) * 35 + 50))
-                            
+                            st.dataframe(display_df, use_container_width=True, height=min(300, len(df) * 35 + 50))
+
                             # Download option
                             csv = df.to_csv(index=False)
                             st.download_button(
-                                f"📥 Download {column_name} issues",
+                                f"📥 Download CSV",
                                 data=csv,
                                 file_name=f"{source_name}_{column_name.replace(' ', '_')}_issues.csv",
                                 mime="text/csv",
                                 key=f"dl_{source_name}_{key}"
                             )
                             st.write("---")
-                
+
                 # Download all issues for this source
                 if source_issues > 0:
+                    st.write("### 📦 Download All Issues for This Source")
                     all_issues_df = pd.concat(validation_results.values(), ignore_index=True)
+                    # Sort by Row for easier navigation
+                    all_issues_df = all_issues_df.sort_values('Row')
                     csv_all = all_issues_df.to_csv(index=False)
                     st.download_button(
-                        f"📥 Download ALL {source_name} validation issues",
+                        f"📥 Download ALL {source_name} Issues (CSV)",
                         data=csv_all,
                         file_name=f"{source_name}_all_validation_issues.csv",
                         mime="text/csv",
                         key=f"dl_all_{source_name}",
                         type="primary",
-                        width='stretch'
+                        use_container_width=True
                     )
 
 def show_report_filters():

@@ -312,6 +312,36 @@ REGION_SIGNATURES = {
     }
 }
 
+# Duplication detection hierarchies by region
+# Defines the matching rules for each confidence level by region
+DUPLICATION_HIERARCHIES = {
+    'New England': {
+        'likely': [
+            'full_name_dob',  # Full Name (3-letter code) + DOB match
+        ],
+        'somewhat_likely': [
+            'full_name_age',  # Full Name (3-letter code) + Age match
+        ],
+        'possible': [
+            'full_name_age_range',  # Full Name (3-letter code) + Age Range match
+        ]
+    },
+    'Great Lakes': {
+        'likely': [
+            'full_name_dob',      # Full Name (First + Last) + DOB match
+            'full_name_age',      # Full Name (First + Last) + Age match
+            'initials_dob',       # Initials (First + Last initial) + DOB match
+        ],
+        'somewhat_likely': [
+            'full_name_age_range',  # Full Name (First + Last) + Age Range match
+            'initials_age',         # Initials (First + Last initial) + Age match
+        ],
+        'possible': [
+            'initials_age_range',  # Initials (First + Last initial) + Age Range match
+        ]
+    }
+}
+
 # Categories
 AGE_RANGES = ['25-34', '35-44', '45-54', '55-64', '65+']
 

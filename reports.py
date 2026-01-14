@@ -293,12 +293,10 @@ def calculate_demographic_info(df: pd.DataFrame, unique_households_df: pd.DataFr
     """Calculate demographic information"""
     
     # Check for source column to exclude TH from CH counts
+    # Per HUD guidelines, Transitional Housing is excluded from chronic homeless counts
     if 'source' in df.columns:
-        ch_mask = (
-            (df['CH'] == 'Yes') & 
-            (~df['source'].str.lower().str.contains('th', na=False)) &
-            (~df['source'].str.lower().str.contains('transitional', na=False))
-        )
+        # Explicit check for Sheltered_TH source (more reliable than string matching)
+        ch_mask = (df['CH'] == 'Yes') & (df['source'] != 'Sheltered_TH')
         ch_persons = df[ch_mask]
         ch_households = ch_persons['Household_ID'].nunique()
         ch_persons_count = ch_persons.drop_duplicates(subset='Household_ID')['total_person_in_household'].sum()
