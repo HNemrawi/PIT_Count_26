@@ -16,9 +16,12 @@ def init_session_state():
         'uploaded_data': {},
         'processed_data': {},
         'calculated_reports': {},
-        'current_step': 'upload'
+        'current_step': 'upload',
+        # Combiner-specific state
+        'combiner_output': None,
+        'combiner_filename': None
     }
-    
+
     for key, default_value in defaults.items():
         if key not in st.session_state:
             st.session_state[key] = default_value
@@ -89,13 +92,6 @@ def get_timezone_for_region(region):
         'Unknown': 'UTC'
     }
     return timezone_mapping.get(region, 'UTC')
-
-# Region timezones configuration
-REGION_TIMEZONES = {
-    'New England': 'America/New_York',
-    'Great Lakes': 'America/Chicago',
-    'Unknown': 'UTC'
-}
 
 def format_number(value):
     """Format number with commas"""

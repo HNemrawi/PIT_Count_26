@@ -168,8 +168,8 @@ def generate_all_reports(processed_data: Dict[str, Dict[str, pd.DataFrame]]) -> 
                 numeric_columns = ['Sheltered_ES', 'Sheltered_TH', 'Unsheltered']
                 report_df[numeric_columns] = report_df[numeric_columns].apply(
                     pd.to_numeric, errors='coerce'
-                ).fillna(0)
-                report_df['Total'] = report_df[numeric_columns].sum(axis=1)
+                )
+                report_df['Total'] = report_df[numeric_columns].sum(axis=1, min_count=1)
     
     return all_reports
 
@@ -192,7 +192,7 @@ def calculate_and_store_stats(input_df: pd.DataFrame, name: str, stored_dfs: Dic
 
 def get_empty_template(index_tuples: List[Tuple[str, str]]) -> pd.DataFrame:
     """Create empty template with MultiIndex"""
-    return pd.DataFrame(0, index=pd.MultiIndex.from_tuples(index_tuples), columns=REPORT_COLUMNS)
+    return pd.DataFrame(np.nan, index=pd.MultiIndex.from_tuples(index_tuples), columns=REPORT_COLUMNS)
 
 def populate_template(df_template: pd.DataFrame, summary_stats: Dict[str, Any], 
                      mapping: List[Tuple[Tuple[str, str], str]], column_name: str):
@@ -332,6 +332,9 @@ def calculate_demographic_info(df: pd.DataFrame, unique_households_df: pd.DataFr
 
     # Gender statistics (optional field)
     for gender, key in GENDER_CATEGORIES.items():
+        # Skip 'More Than One Gender' - it's already calculated above based on gender_count
+        if gender == 'More Than One Gender':
+            continue
         result[key] = df[
             (df['gender_count'] == 'one') & (df['Gender'] == gender)
         ].shape[0]

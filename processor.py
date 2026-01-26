@@ -7,9 +7,9 @@ import pandas as pd
 import numpy as np
 import streamlit as st
 from datetime import datetime
-from typing import Dict, List, Tuple, Optional, Set, Any
+from typing import Dict, List, Tuple, Optional, Set, Any, Union
 from io import BytesIO
-from openpyxl import Workbook
+from openpyxl import Workbook, load_workbook
 from openpyxl.styles import PatternFill, Font, Alignment
 
 from config import (
@@ -254,11 +254,13 @@ def classify_household_type(df: pd.DataFrame) -> pd.DataFrame:
 
 def flatten_entire_dataset(df: pd.DataFrame) -> pd.DataFrame:
     """Transform household-based data into person-based data"""
-    
+
     # Reset index and create Household_ID
     df.reset_index(drop=True, inplace=True)
     df['Household_ID'] = df.index + 1
-    
+    # Store original row index for traceability (Excel row = index + 2 for header)
+    df['_Source_Row_Number'] = df.index + 2
+
     def create_member(row, member_type, member_number):
         """Create a member record"""
         # Set prefix based on member type
@@ -293,8 +295,9 @@ def flatten_entire_dataset(df: pd.DataFrame) -> pd.DataFrame:
         
         # Initialize member dictionary
         member = {
-            'Household_ID': row['Household_ID'], 
-            'Member_Type': member_type, 
+            'Household_ID': row['Household_ID'],
+            'Source_Row_Number': row.get('_Source_Row_Number', row['Household_ID'] + 1),
+            'Member_Type': member_type,
             'Member_Number': member_number
         }
         
@@ -329,10 +332,14 @@ def flatten_entire_dataset(df: pd.DataFrame) -> pd.DataFrame:
     # Create flattened list using list comprehension (faster than append in loop)
     members = []
 
-    # Convert df to dict of records once (faster than iterrows)
-    records = df.to_dict('records')
+    # Use itertuples() for better performance (faster than to_dict('records'))
+    # We need to map tuple values back to column names for compatibility
+    columns = df.columns.tolist()
 
-    for row in records:
+    for row_tuple in df.itertuples(index=False, name=None):
+        # Create dict from tuple values and column names
+        row = dict(zip(columns, row_tuple))
+
         # Process adults (only those that exist in the data)
         for i in adult_slots:
             member = create_member(row, 'Adult', i)
@@ -346,10 +353,16 @@ def flatten_entire_dataset(df: pd.DataFrame) -> pd.DataFrame:
                 members.append(member)
 
     # Create DataFrame once from list (faster than incremental building)
-    return pd.DataFrame(members)
+    flattened_df = pd.DataFrame(members)
+
+    # Assign unique Person_ID to each person for traceability
+    if not flattened_df.empty:
+        flattened_df.insert(0, 'Person_ID', [f'P{i}' for i in range(1, len(flattened_df) + 1)])
+
+    return flattened_df
 
 def flag_chronically_homeless(df: pd.DataFrame) -> pd.DataFrame:
-    """Flag chronically homeless individuals based on criteria"""
+    """Flag chronically homeless individuals based on criteria with reason tracking"""
 
     required_columns = ['homeless_long', 'first_time', 'homeless_long_this_time',
                        'homeless_times', 'homeless_total', 'disability']
@@ -359,6 +372,7 @@ def flag_chronically_homeless(df: pd.DataFrame) -> pd.DataFrame:
     if missing_cols:
         st.warning(f"Missing columns for chronic homelessness calculation: {', '.join(missing_cols)}. Setting all CH to 'No'.")
         df['CH'] = 'No'
+        df['CH_Reason'] = ''
         return df
 
     # Fill NaN values to prevent silent failures in conditions
@@ -369,7 +383,11 @@ def flag_chronically_homeless(df: pd.DataFrame) -> pd.DataFrame:
     df['homeless_total'] = df['homeless_total'].fillna('')
     df['disability'] = df['disability'].fillna('No')
 
+    # Initialize CH_Reason column for traceability
+    df['CH_Reason'] = ''
+
     # Define chronic homelessness conditions
+    has_disability = df['disability'] == 'Yes'
     cond1 = (df['homeless_long'] == 'One year or more') & (df['first_time'] == 'Yes')
     cond2 = (df['homeless_long_this_time'] == 'One year or more') & (df['first_time'] == 'No')
     cond3 = ((df['first_time'] == 'No') &
@@ -377,9 +395,14 @@ def flag_chronically_homeless(df: pd.DataFrame) -> pd.DataFrame:
              (df['homeless_times'] == '4 or more times') &
              (df['homeless_total'] == '12 months or more'))
 
+    # Track reasons for CH flag (applied in priority order)
+    df.loc[cond1 & has_disability, 'CH_Reason'] = 'First time homeless + 1yr+ duration + disability'
+    df.loc[cond2 & has_disability & (df['CH_Reason'] == ''), 'CH_Reason'] = 'Returning + 1yr+ this time + disability'
+    df.loc[cond3 & has_disability & (df['CH_Reason'] == ''), 'CH_Reason'] = 'Returning + <1yr + 4+ episodes + 12mo+ total + disability'
+
     # Apply conditions with disability requirement
     chronic_homeless_condition = cond1 | cond2 | cond3
-    df['CH'] = np.where(chronic_homeless_condition & (df['disability'] == 'Yes'), 'Yes', 'No')
+    df['CH'] = np.where(chronic_homeless_condition & has_disability, 'Yes', 'No')
 
     return df
 
@@ -1310,5 +1333,273 @@ class DataValidator:
                 invalid_df, count = self.validate_column(col, VALID_RACES, allow_multiple=True)
                 if count > 0:
                     validation_results[f"race_{col}"] = invalid_df
-        
+
         return validation_results
+
+
+# ============================================================================
+# PIT COMBINER DATA PROCESSOR
+# For combining HMIS (HUDX 230) and Non-HMIS (HDX) data
+# ============================================================================
+
+import logging
+from pathlib import Path
+
+combiner_logger = logging.getLogger(__name__)
+
+class CombinerDataProcessor:
+    """Handles all data processing operations for PIT Combiner."""
+
+    def __init__(self, template_path: str = "template.xlsx"):
+        self.template_path = template_path
+        self._hmis_wb: Optional[Workbook] = None
+        self._non_hmis_wb: Optional[Workbook] = None
+        self._template_wb: Optional[Workbook] = None
+
+    def clean_cell_value(self, value: Any) -> Union[float, int]:
+        """Convert cell value to numeric type, handling various edge cases."""
+        if value is None:
+            return 0
+        if isinstance(value, (int, float)):
+            if str(value).upper() == 'N/A':
+                return 0
+            return value
+        if isinstance(value, str):
+            cleaned = value.strip().replace(',', '').upper()
+            if not cleaned or cleaned == 'N/A':
+                return 0
+            try:
+                return float(cleaned)
+            except ValueError:
+                return 0
+        return 0
+
+    def should_delete_row(self, row: tuple, terms_to_delete: List[str]) -> bool:
+        """Check if a row should be deleted based on forbidden terms."""
+        for cell in row:
+            if cell.value is None:
+                continue
+            cell_str = str(cell.value)
+            # Preserve HUD instruction rows
+            if "HUD does not allow" in cell_str:
+                return False
+            for term in terms_to_delete:
+                if term in cell_str:
+                    return True
+        return False
+
+    def clean_workbook(self, workbook: Workbook, sheets_to_clean: List[str],
+                       terms_to_delete: List[str]) -> Dict[str, int]:
+        """Clean specified sheets by removing rows with forbidden terms."""
+        stats = {}
+        for sheet_name in sheets_to_clean:
+            if sheet_name not in workbook.sheetnames:
+                continue
+            sheet = workbook[sheet_name]
+            rows_to_delete = []
+            for row in sheet.iter_rows():
+                if self.should_delete_row(row, terms_to_delete):
+                    rows_to_delete.append(row[0].row)
+
+            deleted = 0
+            for row_idx in reversed(rows_to_delete):
+                try:
+                    sheet.delete_rows(row_idx)
+                    deleted += 1
+                except Exception as e:
+                    combiner_logger.error(f"Error deleting row {row_idx} from {sheet_name}: {e}")
+            stats[sheet_name] = deleted
+            if deleted > 0:
+                combiner_logger.info(f"Cleaned {deleted} rows from '{sheet_name}'")
+        return stats
+
+    def get_cell_value(self, sheet, col: str, row: int) -> Union[float, int]:
+        """Safely get a numeric value from a cell."""
+        try:
+            value = sheet[f"{col}{row}"].value
+            return self.clean_cell_value(value)
+        except Exception as e:
+            combiner_logger.debug(f"Error getting cell {col}{row}: {e}")
+            return 0
+
+    def parse_source_key(self, source_key: str) -> Tuple[str, str]:
+        """Parse source key like 'hmis:Adult-Child' into (type, sheet_name)."""
+        parts = source_key.split(':', 1)
+        if len(parts) != 2:
+            raise ValueError(f"Invalid source key format: {source_key}")
+        return parts[0], parts[1]
+
+    def get_workbook_for_source(self, source_type: str) -> Optional[Workbook]:
+        """Get the appropriate workbook based on source type."""
+        if source_type == 'hmis':
+            return self._hmis_wb
+        elif source_type == 'nonhmis':
+            return self._non_hmis_wb
+        return None
+
+    def calculate_combined_value(self, source_ranges: List[Tuple[str, str, int, int]],
+                                  row_offset: int) -> float:
+        """Calculate combined value from multiple source ranges for a specific row."""
+        total = 0.0
+        for source_key, col, start_row, end_row in source_ranges:
+            source_type, sheet_name = self.parse_source_key(source_key)
+            workbook = self.get_workbook_for_source(source_type)
+
+            if workbook is None:
+                combiner_logger.warning(f"No workbook found for source type: {source_type}")
+                continue
+
+            if sheet_name not in workbook.sheetnames:
+                combiner_logger.warning(f"Sheet '{sheet_name}' not found in {source_type} workbook")
+                continue
+
+            sheet = workbook[sheet_name]
+            actual_row = start_row + row_offset
+
+            if actual_row > end_row:
+                continue
+
+            value = self.get_cell_value(sheet, col, actual_row)
+            total += value
+
+        return total
+
+    def process_range_specifications(self, range_specs: List[Any]) -> int:
+        """Process all range specifications and update the template."""
+        cells_updated = 0
+
+        for spec in range_specs:
+            source_ranges = spec.source_ranges
+            target_sheet = spec.target_sheet
+            target_col = spec.target_column
+            target_start = spec.target_start_row
+
+            if target_sheet not in self._template_wb.sheetnames:
+                combiner_logger.warning(f"Target sheet '{target_sheet}' not found in template")
+                continue
+
+            output_sheet = self._template_wb[target_sheet]
+
+            # Determine number of rows from source ranges
+            if not source_ranges:
+                continue
+
+            # Use the first source range to determine row count
+            _, _, start_row, end_row = source_ranges[0]
+            num_rows = end_row - start_row + 1
+
+            for row_offset in range(num_rows):
+                combined_value = self.calculate_combined_value(source_ranges, row_offset)
+                target_row = target_start + row_offset
+                cell_ref = f"{target_col}{target_row}"
+
+                try:
+                    cell = output_sheet[cell_ref]
+                    # Only update if cell doesn't contain a formula
+                    if not (isinstance(cell.value, str) and cell.value.startswith('=')):
+                        cell.value = combined_value
+                        cells_updated += 1
+                except Exception as e:
+                    combiner_logger.error(f"Error updating cell {cell_ref}: {e}")
+
+        combiner_logger.info(f"Updated {cells_updated} cells in template")
+        return cells_updated
+
+    def validate_workbooks(self, validation_rules: Dict) -> Tuple[bool, List[str]]:
+        """Validate that all required sheets exist in the workbooks."""
+        errors = []
+
+        # Check HMIS sheets
+        if self._hmis_wb:
+            hmis_sheets = set(self._hmis_wb.sheetnames)
+            required = set(validation_rules.get('required_sheets_hmis', []))
+            missing = required - hmis_sheets
+            if missing:
+                errors.append(f"HMIS file missing sheets: {missing}")
+
+        # Check Non-HMIS sheets
+        if self._non_hmis_wb:
+            non_hmis_sheets = set(self._non_hmis_wb.sheetnames)
+            required = set(validation_rules.get('required_sheets_non_hmis', []))
+            missing = required - non_hmis_sheets
+            if missing:
+                errors.append(f"Non-HMIS file missing sheets: {missing}")
+
+        # Check Template sheets
+        if self._template_wb:
+            template_sheets = set(self._template_wb.sheetnames)
+            required = set(validation_rules.get('required_sheets_template', []))
+            missing = required - template_sheets
+            if missing:
+                errors.append(f"Template file missing sheets: {missing}")
+
+        return len(errors) == 0, errors
+
+    def process_and_combine(self, hmis_stream, non_hmis_stream,
+                            range_specs: List[Any],
+                            terms_to_delete: List[str],
+                            validation_rules: Optional[Dict] = None) -> BytesIO:
+        """Main processing function to combine HMIS and Non-HMIS data."""
+        try:
+            # Load HMIS workbook
+            combiner_logger.info("Loading HMIS workbook...")
+            hmis_stream.seek(0)
+            self._hmis_wb = load_workbook(
+                filename=BytesIO(hmis_stream.read()),
+                data_only=True,
+                read_only=False
+            )
+
+            # Load Non-HMIS workbook
+            combiner_logger.info("Loading Non-HMIS workbook...")
+            non_hmis_stream.seek(0)
+            self._non_hmis_wb = load_workbook(
+                filename=BytesIO(non_hmis_stream.read()),
+                data_only=True,
+                read_only=False
+            )
+
+            # Load template (preserve formulas)
+            combiner_logger.info("Loading template workbook...")
+            if not Path(self.template_path).exists():
+                raise FileNotFoundError(f"Template file '{self.template_path}' not found")
+
+            with open(self.template_path, "rb") as f:
+                self._template_wb = load_workbook(
+                    filename=BytesIO(f.read()),
+                    data_only=False,
+                    read_only=False
+                )
+
+            # Validate workbooks if rules provided
+            if validation_rules:
+                is_valid, errors = self.validate_workbooks(validation_rules)
+                if not is_valid:
+                    combiner_logger.warning(f"Validation warnings: {errors}")
+
+            # Clean HMIS data (contains "Client Doesn't Know" etc.)
+            combiner_logger.info("Cleaning HMIS data...")
+            hmis_sheets = list(self._hmis_wb.sheetnames)
+            self.clean_workbook(self._hmis_wb, hmis_sheets, terms_to_delete)
+
+            # Process range specifications
+            combiner_logger.info("Processing range specifications...")
+            cells_updated = self.process_range_specifications(range_specs)
+
+            # Save to BytesIO
+            combiner_logger.info("Saving combined workbook...")
+            output = BytesIO()
+            self._template_wb.save(output)
+            output.seek(0)
+
+            combiner_logger.info(f"Processing complete. Cells updated: {cells_updated}")
+            return output
+
+        except Exception as e:
+            combiner_logger.error(f"Error in process_and_combine: {e}")
+            raise
+        finally:
+            # Clean up
+            self._hmis_wb = None
+            self._non_hmis_wb = None
+            self._template_wb = None

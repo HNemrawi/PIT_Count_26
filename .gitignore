@@ -66,3 +66,7 @@ config/credentials.py
 !requirements.txt
 !README.md
 !.streamlit/config.toml
+!template.xlsx
+
+# Agent specific
+.claude/

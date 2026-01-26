@@ -2,5 +2,6 @@ streamlit
 pandas
 numpy
 openpyxl
+python-calamine
 pytz
 plotly
