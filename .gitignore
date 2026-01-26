@@ -67,6 +67,8 @@ config/credentials.py
 !README.md
 !.streamlit/config.toml
 !template.xlsx
+!DV_temp.xlsx
 
 # Agent specific
 .claude/
+CLAUDE.md
