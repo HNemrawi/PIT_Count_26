@@ -241,13 +241,17 @@ def show_upload_interface():
                         if dropped > 0:
                             st.info(f"{source_name}: Removed {dropped} rows with missing timestamps")
                     
-                    # Check essential columns
-                    essential = ['Timestamp', 'Gender', 'Race/Ethnicity', 'Age Range']
+                    # Check essential columns (Gender is optional as not all regions collect it)
+                    essential = ['Timestamp', 'Race/Ethnicity', 'Age Range']
+                    optional = ['Gender']
                     missing = set(essential) - set(df.columns)
-                    
+                    missing_optional = set(optional) - set(df.columns)
+
                     if missing:
                         st.error(f"❌ {source_name}: Missing columns: {', '.join(missing)}")
                     else:
+                        if missing_optional:
+                            st.info(f"ℹ️ {source_name}: Optional column(s) not found: {', '.join(missing_optional)} - Gender statistics will be unavailable")
                         valid_data[source_name] = df
                 
                 if valid_data:

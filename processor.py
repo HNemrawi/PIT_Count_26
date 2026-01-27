@@ -882,15 +882,22 @@ class DuplicationDetector:
 
     def _compare_pair_new_england(self, r1, r2, pair: tuple) -> Tuple[str, str]:
         """
-        New England duplication rules.
+        New England duplication rules with contradictory evidence checking.
 
-        Hierarchy:
-        - Likely: Full Name (3-letter code) + DOB
-        - Somewhat Likely: Full Name (3-letter code) + Age
-        - Possible: Full Name (3-letter code) + Age Range
+        Data Precision Hierarchy (most to least precise):
+            DOB > Exact Age > Age Range
 
-        Note: New England uses 3-letter codes (first_initial + last_initial + last_third)
-        and does NOT use initials-based matching.
+        Matching Rules (uses 3-letter codes: first_initial + last_initial + last_third):
+        - Only falls back to less precise data when more precise data is unavailable
+        - If DOB or Age exists but doesn't match, stop (contradictory evidence)
+        - No separate initials matching (only full 3-letter code)
+
+        Full Name (3-letter code) Matching:
+            - Full Name + DOB match         → LIKELY
+            - Full Name + DOB differs       → NOT DUPLICATE (contradicts)
+            - Full Name + Age match         → SOMEWHAT LIKELY
+            - Full Name + Age differs       → NOT DUPLICATE (contradicts)
+            - Full Name + Age Range match   → POSSIBLE (only if no DOB/Age)
         """
         # Extract fields
         f1, f2 = r1["_full_name"], r2["_full_name"]
@@ -901,35 +908,64 @@ class DuplicationDetector:
         rng1 = r1.get("age_range") or r1.get("Age Range")
         rng2 = r2.get("age_range") or r2.get("Age Range")
 
+        # Determine what data is available
+        has_dob = bool(dob1) and bool(dob2)
+        has_age = (age1 is not None) and (age2 is not None)
+
+        # Full name must match for any duplicate detection in New England
+        if f1 != f2:
+            return "Not Duplicate", ""
+
         # LIKELY: Full Name + DOB
-        if f1 == f2 and dob1 and dob2 and dob1 == dob2:
+        if has_dob and dob1 == dob2:
             self.high_confidence_matches.add(pair)
             return "Likely Duplicate 🔴", "Full name and DOB match"
 
-        # SOMEWHAT LIKELY: Full Name + Age
-        if pair not in self.high_confidence_matches:
-            if f1 == f2 and age1 is not None and age2 is not None and age1 == age2:
-                self.medium_confidence_matches.add(pair)
-                return "Somewhat Likely Duplicate 🟠", "Full name and age match"
+        # Contradictory: DOBs exist but don't match
+        if has_dob and dob1 != dob2:
+            return "Not Duplicate", ""
 
-        # POSSIBLE: Full Name + Age Range
+        # SOMEWHAT LIKELY: Full Name + Exact Age
+        if pair not in self.high_confidence_matches:
+            if has_age and age1 == age2:
+                self.medium_confidence_matches.add(pair)
+                return "Somewhat Likely Duplicate 🟠", "Full name and exact age match"
+
+        # Contradictory: Ages exist but don't match
+        if has_age and age1 != age2:
+            return "Not Duplicate", ""
+
+        # POSSIBLE: Full Name + Age Range (only if no DOB/Age available)
         if pair not in self.high_confidence_matches and pair not in self.medium_confidence_matches:
-            if f1 == f2 and rng1 and rng2 and rng1 == rng2:
+            if rng1 and rng2 and rng1 == rng2:
                 return "Possible Duplicate 🟡", "Full name and age range match"
 
         return "Not Duplicate", ""
 
     def _compare_pair_great_lakes(self, r1, r2, pair: tuple) -> Tuple[str, str]:
         """
-        Great Lakes duplication rules.
+        Great Lakes duplication rules with contradictory evidence checking.
 
-        Hierarchy:
-        - Likely: Full Name + DOB, Full Name + Age, Initials + DOB
-        - Somewhat Likely: Full Name + Age Range, Initials + Age
-        - Possible: Initials + Age Range
+        Data Precision Hierarchy (most to least precise):
+            DOB > Exact Age > Age Range
 
-        Note: Great Lakes uses full names (first_name + first_letter_of_last_name or last_name)
-        and includes initials-based matching for lower confidence levels.
+        Matching Rules:
+        - Only falls back to less precise data when more precise data is unavailable
+        - If DOB or Age exists but doesn't match, stop (contradictory evidence)
+
+        Full Name Matching:
+            - Full Name + DOB match         → LIKELY
+            - Full Name + DOB differs       → NOT DUPLICATE (contradicts)
+            - Full Name + Age match         → LIKELY
+            - Full Name + Age differs       → NOT DUPLICATE (contradicts)
+            - Full Name + Age Range match   → SOMEWHAT LIKELY (only if no DOB/Age)
+
+        Initials Matching (when full names don't match):
+            - Initials + DOB match          → LIKELY
+            - Initials + DOB differs        → NOT DUPLICATE (contradicts)
+            - Initials + Age match          → SOMEWHAT LIKELY
+            - Initials + Age differs        → NOT DUPLICATE (contradicts)
+            - Initials + Age Range match    → POSSIBLE (only if no DOB/Age)
         """
         # Extract fields
         f1, f2 = r1["_full_name"], r2["_full_name"]
@@ -941,50 +977,90 @@ class DuplicationDetector:
         rng1 = r1.get("age_range") or r1.get("Age Range")
         rng2 = r2.get("age_range") or r2.get("Age Range")
 
-        # LIKELY: Full Name + DOB
-        if f1 == f2 and dob1 and dob2 and dob1 == dob2:
-            self.high_confidence_matches.add(pair)
-            return "Likely Duplicate 🔴", "Full name and DOB match"
+        # Determine what data is available for comparison
+        has_dob = bool(dob1) and bool(dob2)
+        has_age = (age1 is not None) and (age2 is not None)
 
-        # LIKELY: Full Name + Age
-        if f1 == f2 and age1 is not None and age2 is not None and age1 == age2:
-            self.high_confidence_matches.add(pair)
-            return "Likely Duplicate 🔴", "Full name and age match"
+        # === FULL NAME MATCHING ===
+        if f1 == f2:
+            # LIKELY: Full Name + DOB
+            if has_dob and dob1 == dob2:
+                self.high_confidence_matches.add(pair)
+                return "Likely Duplicate 🔴", "Full name and DOB match"
 
-        # LIKELY: Initials + DOB
-        if init1 == init2 and dob1 and dob2 and dob1 == dob2:
-            self.high_confidence_matches.add(pair)
-            return "Likely Duplicate 🔴", "Initials and DOB match"
+            # Contradictory: DOBs exist but don't match
+            if has_dob and dob1 != dob2:
+                return "Not Duplicate", ""
 
-        # SOMEWHAT LIKELY: Full Name + Age Range
-        if pair not in self.high_confidence_matches:
-            if f1 == f2 and rng1 and rng2 and rng1 == rng2:
-                self.medium_confidence_matches.add(pair)
-                return "Somewhat Likely Duplicate 🟠", "Full name and age range match"
+            # LIKELY: Full Name + Exact Age
+            if has_age and age1 == age2:
+                self.high_confidence_matches.add(pair)
+                return "Likely Duplicate 🔴", "Full name and exact age match"
 
-        # SOMEWHAT LIKELY: Initials + Age
-        if pair not in self.high_confidence_matches:
-            if init1 == init2 and age1 is not None and age2 is not None and age1 == age2:
-                self.medium_confidence_matches.add(pair)
-                return "Somewhat Likely Duplicate 🟠", "Initials and age match"
+            # Contradictory: Ages exist but don't match
+            if has_age and age1 != age2:
+                return "Not Duplicate", ""
 
-        # POSSIBLE: Initials + Age Range
-        if pair not in self.high_confidence_matches and pair not in self.medium_confidence_matches:
-            if init1 == init2 and rng1 and rng2 and rng1 == rng2:
-                return "Possible Duplicate 🟡", "Initials and age range match"
+            # SOMEWHAT LIKELY: Full Name + Age Range (only if no DOB/Age available)
+            if pair not in self.high_confidence_matches:
+                if rng1 and rng2 and rng1 == rng2:
+                    self.medium_confidence_matches.add(pair)
+                    return "Somewhat Likely Duplicate 🟠", "Full name and age range match"
+
+            return "Not Duplicate", ""
+
+        # === INITIALS MATCHING (when full names don't match) ===
+        if init1 == init2:
+            # LIKELY: Initials + DOB
+            if has_dob and dob1 == dob2:
+                self.high_confidence_matches.add(pair)
+                return "Likely Duplicate 🔴", "Initials and DOB match"
+
+            # Contradictory: DOBs exist but don't match
+            if has_dob and dob1 != dob2:
+                return "Not Duplicate", ""
+
+            # SOMEWHAT LIKELY: Initials + Exact Age
+            if pair not in self.high_confidence_matches:
+                if has_age and age1 == age2:
+                    self.medium_confidence_matches.add(pair)
+                    return "Somewhat Likely Duplicate 🟠", "Initials and exact age match"
+
+            # Contradictory: Ages exist but don't match
+            if has_age and age1 != age2:
+                return "Not Duplicate", ""
+
+            # POSSIBLE: Initials + Age Range (only if no DOB/Age available)
+            if pair not in self.high_confidence_matches and pair not in self.medium_confidence_matches:
+                if rng1 and rng2 and rng1 == rng2:
+                    return "Possible Duplicate 🟡", "Initials and age range match"
 
         return "Not Duplicate", ""
 
     def _compare_pair_universal(self, r1, r2, pair: tuple) -> Tuple[str, str]:
         """
-        Universal duplication rules (fallback for unknown regions).
+        Universal duplication rules with contradictory evidence checking (fallback).
 
-        Uses the original hierarchy that worked for all regions before region-specific rules:
-        - Likely: Full Name + DOB, Initials + DOB, Full Name + Age
-        - Somewhat Likely: Initials + Age, Full Name + Age Range
-        - Possible: Initials + Age Range
+        Data Precision Hierarchy (most to least precise):
+            DOB > Exact Age > Age Range
 
-        This preserves backward compatibility for regions without specific rules.
+        Matching Rules:
+        - Only falls back to less precise data when more precise data is unavailable
+        - If DOB or Age exists but doesn't match, stop (contradictory evidence)
+
+        Full Name Matching:
+            - Full Name + DOB match         → LIKELY
+            - Full Name + DOB differs       → NOT DUPLICATE (contradicts)
+            - Full Name + Age match         → LIKELY
+            - Full Name + Age differs       → NOT DUPLICATE (contradicts)
+            - Full Name + Age Range match   → SOMEWHAT LIKELY (only if no DOB/Age)
+
+        Initials Matching (when full names don't match):
+            - Initials + DOB match          → LIKELY
+            - Initials + DOB differs        → NOT DUPLICATE (contradicts)
+            - Initials + Age match          → SOMEWHAT LIKELY
+            - Initials + Age differs        → NOT DUPLICATE (contradicts)
+            - Initials + Age Range match    → POSSIBLE (only if no DOB/Age)
         """
         # Extract fields
         f1, f2 = r1["_full_name"], r2["_full_name"]
@@ -996,86 +1072,115 @@ class DuplicationDetector:
         rng1 = r1.get("age_range") or r1.get("Age Range")
         rng2 = r2.get("age_range") or r2.get("Age Range")
 
-        # LIKELY: DOB matches
-        if dob1 and dob2 and dob1 == dob2:
-            if f1 == f2:
+        # Determine what data is available for comparison
+        has_dob = bool(dob1) and bool(dob2)
+        has_age = (age1 is not None) and (age2 is not None)
+
+        # === FULL NAME MATCHING ===
+        if f1 == f2:
+            # LIKELY: Full Name + DOB
+            if has_dob and dob1 == dob2:
                 self.high_confidence_matches.add(pair)
                 return "Likely Duplicate 🔴", "Full name and DOB match"
-            if init1 == init2:
+
+            # Contradictory: DOBs exist but don't match
+            if has_dob and dob1 != dob2:
+                return "Not Duplicate", ""
+
+            # LIKELY: Full Name + Exact Age
+            if has_age and age1 == age2:
                 self.high_confidence_matches.add(pair)
-                return "Likely Duplicate 🔴", "Initials and DOB match"
+                return "Likely Duplicate 🔴", "Full name and exact age match"
 
-        # LIKELY: Full Name + Age
-        if age1 is not None and age2 is not None and age1 == age2:
-            if f1 == f2:
-                self.high_confidence_matches.add(pair)
-                return "Likely Duplicate 🔴", "Full name and age match"
+            # Contradictory: Ages exist but don't match
+            if has_age and age1 != age2:
+                return "Not Duplicate", ""
 
-        # SOMEWHAT LIKELY
-        if pair not in self.high_confidence_matches:
-            if age1 is not None and age2 is not None and age1 == age2:
-                if init1 == init2:
-                    self.medium_confidence_matches.add(pair)
-                    return "Somewhat Likely Duplicate 🟠", "Initials and age match"
-
-            if rng1 and rng2 and rng1 == rng2:
-                if f1 == f2:
+            # SOMEWHAT LIKELY: Full Name + Age Range (only if no DOB/Age available)
+            if pair not in self.high_confidence_matches:
+                if rng1 and rng2 and rng1 == rng2:
                     self.medium_confidence_matches.add(pair)
                     return "Somewhat Likely Duplicate 🟠", "Full name and age range match"
 
-        # POSSIBLE
-        if pair not in self.high_confidence_matches and pair not in self.medium_confidence_matches:
-            if rng1 and rng2 and rng1 == rng2:
-                if init1 == init2:
+            return "Not Duplicate", ""
+
+        # === INITIALS MATCHING (when full names don't match) ===
+        if init1 == init2:
+            # LIKELY: Initials + DOB
+            if has_dob and dob1 == dob2:
+                self.high_confidence_matches.add(pair)
+                return "Likely Duplicate 🔴", "Initials and DOB match"
+
+            # Contradictory: DOBs exist but don't match
+            if has_dob and dob1 != dob2:
+                return "Not Duplicate", ""
+
+            # SOMEWHAT LIKELY: Initials + Exact Age
+            if pair not in self.high_confidence_matches:
+                if has_age and age1 == age2:
+                    self.medium_confidence_matches.add(pair)
+                    return "Somewhat Likely Duplicate 🟠", "Initials and exact age match"
+
+            # Contradictory: Ages exist but don't match
+            if has_age and age1 != age2:
+                return "Not Duplicate", ""
+
+            # POSSIBLE: Initials + Age Range (only if no DOB/Age available)
+            if pair not in self.high_confidence_matches and pair not in self.medium_confidence_matches:
+                if rng1 and rng2 and rng1 == rng2:
                     return "Possible Duplicate 🟡", "Initials and age range match"
 
         return "Not Duplicate", ""
 
     def annotate(self) -> pd.DataFrame:
         """
-        Annotate dataframe with duplication scores.
-        
-        Returns DataFrame with three new columns:
+        Annotate dataframe with duplication scores and validation columns.
+
+        Returns DataFrame with columns:
         - Duplication_Score: Category of duplication likelihood
         - Duplication_Reason: Explanation of the match
         - Duplicates_With: Comma-separated list of matching row indices
+        - Dup_Sex: Sex value of first duplicate partner (for manual verification)
+        - Dup_Race/Ethnicity: Race/Ethnicity value of first duplicate partner (for manual verification)
         """
         n = len(self.data)
         best_match = {}
         partners = {}
-        
+
         # Clear tracking sets
         self.high_confidence_matches.clear()
         self.medium_confidence_matches.clear()
-        
+
         # Compare all pairs
         for i in range(n):
             if self.data.at[i, "_is_no_name"]:
                 continue
-            
+
             for j in range(i + 1, n):
                 if self.data.at[j, "_is_no_name"]:
                     continue
-                
+
                 score, reason = self._compare_pair(i, j)
-                
+
                 if score != "Not Duplicate":
                     # Track partners
                     partners.setdefault(i, set()).add(j)
                     partners.setdefault(j, set()).add(i)
-                    
+
                     # Update best match
                     for idx in [i, j]:
                         prev_score, _ = best_match.get(idx, ("Not Duplicate", ""))
                         if self._score_priority(score) > self._score_priority(prev_score):
                             best_match[idx] = (score, reason)
-        
+
         # Create output
         out = self.data.copy()
         out["Duplication_Score"] = "Not Duplicate"
         out["Duplication_Reason"] = ""
         out["Duplicates_With"] = ""
-        
+        out["Dup_Sex"] = ""
+        out["Dup_Race/Ethnicity"] = ""
+
         for idx in range(n):
             if self.data.at[idx, "_is_no_name"]:
                 out.at[idx, "Duplication_Score"] = "No name information provided 🟣"
@@ -1087,7 +1192,21 @@ class DuplicationDetector:
                 out.at[idx, "Duplicates_With"] = ",".join(
                     str(p) for p in sorted(partners[idx])
                 )
-        
+
+                # Add partner's Sex and Race for validation
+                if idx in partners and partners[idx]:
+                    # Get first partner (lowest row number) for comparison
+                    partner_idx = min(partners[idx])
+
+                    # Get partner's Sex
+                    partner_sex = self.data.iloc[partner_idx].get("Sex", "")
+                    out.at[idx, "Dup_Sex"] = partner_sex if partner_sex and str(partner_sex) != 'nan' else ""
+
+                    # Get partner's Race/Ethnicity
+                    partner_race = (self.data.iloc[partner_idx].get("Race/Ethnicity", "")
+                                   or self.data.iloc[partner_idx].get("race", ""))
+                    out.at[idx, "Dup_Race/Ethnicity"] = partner_race if partner_race and str(partner_race) != 'nan' else ""
+
         return out
     
     def _score_priority(self, score: str) -> int:
@@ -1113,12 +1232,12 @@ class DuplicationDetector:
         - Auto-adjusted column widths
         - Duplicates_With indices adjusted for Excel (zero-based → 1-based starting at row 2)
         """
-        # Create merged dataframe: original data + duplication columns
+        # Create merged dataframe: original data + duplication columns + validation columns
         # Get original columns (stored in self.data before name field preparation)
         original_cols = [col for col in self.data.columns if not col.startswith('_')]
-        dup_cols = ['Duplication_Score', 'Duplication_Reason', 'Duplicates_With']
+        dup_cols = ['Duplication_Score', 'Duplication_Reason', 'Duplicates_With', 'Dup_Sex', 'Dup_Race/Ethnicity']
 
-        # Reorder: original columns first, then duplication columns
+        # Reorder: original columns first, then duplication columns, then validation columns
         export_df = annotated_df[original_cols + dup_cols].copy()
 
         # Reset index to ensure continuous 0-based indexing for row number calculations
