@@ -288,9 +288,11 @@ def flatten_entire_dataset(df: pd.DataFrame) -> pd.DataFrame:
         
         # Household attributes to include
         household_attrs = [
-            'count_adult', 'count_youth', 'count_child_hoh', 
-            'count_child_hh', 'total_person_in_household', 
-            'household_type', 'youth'
+            'count_adult', 'count_youth', 'count_child_hoh',
+            'count_child_hh', 'total_person_in_household',
+            'household_type', 'youth',
+            # Filter columns (preserve for report filtering)
+            'Location: General', 'Project Name on HIC', 'County', 'AHS District'
         ]
         
         # Initialize member dictionary
