@@ -781,7 +781,7 @@ def show_report_filters():
         return
 
     # Collect all unique values from all data sources for filter columns
-    filter_columns = ['Project Name on HIC', 'County', 'AHS District']
+    filter_columns = ['Project Name on HIC', 'County', 'AHS District', 'Location: General']
     available_filters = {}
 
     for col in filter_columns:

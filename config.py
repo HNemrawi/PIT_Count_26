@@ -283,6 +283,7 @@ UNIFIED_COLUMN_MAPPINGS = {
     'Project Name on HIC': [('Project Name on HIC', 100)],
     'County': [('County', 100)],
     'AHS District': [('AHS District', 100)],
+    'Location: General': [('Location: General', 100)],
 }
 
 # ============================================================================
