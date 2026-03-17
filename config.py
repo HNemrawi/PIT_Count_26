@@ -1447,30 +1447,41 @@ COMBINER_TERMS_TO_DELETE: List[str] = [
 ]
 
 # Range specifications for mapping source data to template
+#
+# CORRECTION SUMMARY (19 fixes total):
+# The HMIS source ranges consistently started 1 row too early, landing on the
+# section header row instead of the first data row. All nonhmis ranges and
+# template target rows were already correct.
+#
+# Affected sheets: Without Children, Only Children, Veteran Adult-Child,
+#   Veteran Without Children, Unaccompanied Youth, Parenting Youth,
+#   Homeless Subpopulations
+# Adult-Child was the only HMIS sheet with correct ranges (no header offset).
+
 COMBINER_RANGE_SPECIFICATIONS: List[RangeSpec] = [
     # ========================================================================
     # ALL HOUSEHOLDS - Households with at Least One Adult and One Child
     # ========================================================================
     # Demographics (Total households, persons, age groups)
-    RangeSpec([('hmis:Adult-Child', 'D', 18, 26), ('nonhmis:HDX_Totals', 'C', 3, 11)],
+    RangeSpec([('hmis:Adult-Child', 'D', 19, 27), ('nonhmis:HDX_Totals', 'C', 3, 11)],
               'All Households', 'B', 3),
-    RangeSpec([('hmis:Adult-Child', 'E', 18, 26), ('nonhmis:HDX_Totals', 'D', 3, 11)],
+    RangeSpec([('hmis:Adult-Child', 'E', 19, 27), ('nonhmis:HDX_Totals', 'D', 3, 11)],
               'All Households', 'C', 3),
     RangeSpec([('nonhmis:HDX_Totals', 'E', 3, 11)],
               'All Households', 'D', 3),
 
     # Race and Ethnicity (Adult-Child)
-    RangeSpec([('hmis:Adult-Child', 'D', 28, 42), ('nonhmis:HDX_Totals', 'C', 29, 43)],
+    RangeSpec([('hmis:Adult-Child', 'D', 29, 43), ('nonhmis:HDX_Totals', 'C', 29, 43)],
               'All Households', 'B', 13),
-    RangeSpec([('hmis:Adult-Child', 'E', 28, 42), ('nonhmis:HDX_Totals', 'D', 29, 43)],
+    RangeSpec([('hmis:Adult-Child', 'E', 29, 43), ('nonhmis:HDX_Totals', 'D', 29, 43)],
               'All Households', 'C', 13),
     RangeSpec([('nonhmis:HDX_Totals', 'E', 29, 43)],
               'All Households', 'D', 13),
 
     # Chronically Homeless (Adult-Child)
-    RangeSpec([('hmis:Adult-Child', 'D', 44, 45), ('nonhmis:HDX_Totals', 'C', 44, 45)],
+    RangeSpec([('hmis:Adult-Child', 'D', 45, 46), ('nonhmis:HDX_Totals', 'C', 44, 45)],
               'All Households', 'B', 29),
-    RangeSpec([('hmis:Adult-Child', 'E', 44, 45), ('nonhmis:HDX_Totals', 'D', 44, 45)],
+    RangeSpec([('hmis:Adult-Child', 'E', 45, 46), ('nonhmis:HDX_Totals', 'D', 44, 45)],
               'All Households', 'C', 29),
     RangeSpec([('nonhmis:HDX_Totals', 'E', 44, 45)],
               'All Households', 'D', 29),
@@ -1479,25 +1490,28 @@ COMBINER_RANGE_SPECIFICATIONS: List[RangeSpec] = [
     # ALL HOUSEHOLDS - Households without Children
     # ========================================================================
     # Demographics
-    RangeSpec([('hmis:Without Children', 'C', 14, 21), ('nonhmis:HDX_Totals', 'C', 54, 61)],
+    # FIX: hmis rows 14→15 start, 21→22 end (row 14 was the column header)
+    RangeSpec([('hmis:Without Children', 'C', 15, 22), ('nonhmis:HDX_Totals', 'C', 54, 61)],
               'All Households', 'B', 36),
-    RangeSpec([('hmis:Without Children', 'D', 14, 21), ('nonhmis:HDX_Totals', 'D', 54, 61)],
+    RangeSpec([('hmis:Without Children', 'D', 15, 22), ('nonhmis:HDX_Totals', 'D', 54, 61)],
               'All Households', 'C', 36),
     RangeSpec([('nonhmis:HDX_Totals', 'E', 54, 61)],
               'All Households', 'D', 36),
 
     # Race and Ethnicity (Without Children)
-    RangeSpec([('hmis:Without Children', 'C', 23, 37), ('nonhmis:HDX_Totals', 'C', 79, 93)],
+    # FIX: hmis rows 23→24 start, 37→38 end (row 23 was the race header)
+    RangeSpec([('hmis:Without Children', 'C', 24, 38), ('nonhmis:HDX_Totals', 'C', 79, 93)],
               'All Households', 'B', 45),
-    RangeSpec([('hmis:Without Children', 'D', 23, 37), ('nonhmis:HDX_Totals', 'D', 79, 93)],
+    RangeSpec([('hmis:Without Children', 'D', 24, 38), ('nonhmis:HDX_Totals', 'D', 79, 93)],
               'All Households', 'C', 45),
     RangeSpec([('nonhmis:HDX_Totals', 'E', 79, 93)],
               'All Households', 'D', 45),
 
     # Chronically Homeless (Without Children)
-    RangeSpec([('hmis:Without Children', 'C', 39, 39), ('nonhmis:HDX_Totals', 'C', 94, 94)],
+    # FIX: hmis C 39→40 (row 39 was chronic header); hmis D 41→40 (row 41 was empty)
+    RangeSpec([('hmis:Without Children', 'C', 40, 40), ('nonhmis:HDX_Totals', 'C', 94, 94)],
               'All Households', 'B', 61),
-    RangeSpec([('hmis:Without Children', 'D', 41, 41), ('nonhmis:HDX_Totals', 'D', 94, 94)],
+    RangeSpec([('hmis:Without Children', 'D', 40, 40), ('nonhmis:HDX_Totals', 'D', 94, 94)],
               'All Households', 'C', 61),
     RangeSpec([('nonhmis:HDX_Totals', 'E', 94, 94)],
               'All Households', 'D', 61),
@@ -1506,25 +1520,28 @@ COMBINER_RANGE_SPECIFICATIONS: List[RangeSpec] = [
     # ALL HOUSEHOLDS - Households with Only Children
     # ========================================================================
     # Demographics
-    RangeSpec([('hmis:Only Children', 'C', 14, 15), ('nonhmis:HDX_Totals', 'C', 103, 104)],
+    # FIX: hmis rows 14→15 start, 15→16 end (row 14 was the column header)
+    RangeSpec([('hmis:Only Children', 'C', 15, 16), ('nonhmis:HDX_Totals', 'C', 103, 104)],
               'All Households', 'B', 67),
-    RangeSpec([('hmis:Only Children', 'D', 14, 15), ('nonhmis:HDX_Totals', 'D', 103, 104)],
+    RangeSpec([('hmis:Only Children', 'D', 15, 16), ('nonhmis:HDX_Totals', 'D', 103, 104)],
               'All Households', 'C', 67),
     RangeSpec([('nonhmis:HDX_Totals', 'E', 103, 104)],
               'All Households', 'D', 67),
 
     # Race and Ethnicity (Only Children)
-    RangeSpec([('hmis:Only Children', 'C', 17, 31), ('nonhmis:HDX_Totals', 'C', 122, 136)],
+    # FIX: hmis rows 17→18 start, 31→32 end (row 17 was the race header)
+    RangeSpec([('hmis:Only Children', 'C', 18, 32), ('nonhmis:HDX_Totals', 'C', 122, 136)],
               'All Households', 'B', 70),
-    RangeSpec([('hmis:Only Children', 'D', 17, 31), ('nonhmis:HDX_Totals', 'D', 122, 136)],
+    RangeSpec([('hmis:Only Children', 'D', 18, 32), ('nonhmis:HDX_Totals', 'D', 122, 136)],
               'All Households', 'C', 70),
     RangeSpec([('nonhmis:HDX_Totals', 'E', 122, 136)],
               'All Households', 'D', 70),
 
     # Chronically Homeless (Only Children)
-    RangeSpec([('hmis:Only Children', 'C', 33, 33), ('nonhmis:HDX_Totals', 'C', 137, 137)],
+    # FIX: hmis rows 33→34 (row 33 was the chronic header)
+    RangeSpec([('hmis:Only Children', 'C', 34, 34), ('nonhmis:HDX_Totals', 'C', 137, 137)],
               'All Households', 'B', 86),
-    RangeSpec([('hmis:Only Children', 'D', 33, 33), ('nonhmis:HDX_Totals', 'D', 137, 137)],
+    RangeSpec([('hmis:Only Children', 'D', 34, 34), ('nonhmis:HDX_Totals', 'D', 137, 137)],
               'All Households', 'C', 86),
     RangeSpec([('nonhmis:HDX_Totals', 'E', 137, 137)],
               'All Households', 'D', 86),
@@ -1533,25 +1550,28 @@ COMBINER_RANGE_SPECIFICATIONS: List[RangeSpec] = [
     # VETERAN HOUSEHOLDS - with at Least One Adult and One Child
     # ========================================================================
     # Demographics
-    RangeSpec([('hmis:Veteran Adult-Child', 'D', 16, 18), ('nonhmis:HDX_Veterans', 'C', 3, 5)],
+    # FIX: hmis rows 16→17 start, 18→19 end (row 16 was the column header)
+    RangeSpec([('hmis:Veteran Adult-Child', 'D', 17, 19), ('nonhmis:HDX_Veterans', 'C', 3, 5)],
               'Veteran Households Only', 'B', 3),
-    RangeSpec([('hmis:Veteran Adult-Child', 'E', 16, 18), ('nonhmis:HDX_Veterans', 'D', 3, 5)],
+    RangeSpec([('hmis:Veteran Adult-Child', 'E', 17, 19), ('nonhmis:HDX_Veterans', 'D', 3, 5)],
               'Veteran Households Only', 'C', 3),
     RangeSpec([('nonhmis:HDX_Veterans', 'E', 3, 5)],
               'Veteran Households Only', 'D', 3),
 
     # Race and Ethnicity (Veteran Adult-Child)
-    RangeSpec([('hmis:Veteran Adult-Child', 'D', 20, 34), ('nonhmis:HDX_Veterans', 'C', 23, 37)],
+    # FIX: hmis rows 20→21 start, 34→35 end (row 20 was the race header)
+    RangeSpec([('hmis:Veteran Adult-Child', 'D', 21, 35), ('nonhmis:HDX_Veterans', 'C', 23, 37)],
               'Veteran Households Only', 'B', 7),
-    RangeSpec([('hmis:Veteran Adult-Child', 'E', 20, 34), ('nonhmis:HDX_Veterans', 'D', 23, 37)],
+    RangeSpec([('hmis:Veteran Adult-Child', 'E', 21, 35), ('nonhmis:HDX_Veterans', 'D', 23, 37)],
               'Veteran Households Only', 'C', 7),
     RangeSpec([('nonhmis:HDX_Veterans', 'E', 23, 37)],
               'Veteran Households Only', 'D', 7),
 
     # Chronically Homeless (Veteran Adult-Child)
-    RangeSpec([('hmis:Veteran Adult-Child', 'D', 36, 37), ('nonhmis:HDX_Veterans', 'C', 38, 39)],
+    # FIX: hmis rows 36→37 start, 37→38 end (row 36 was the chronic header)
+    RangeSpec([('hmis:Veteran Adult-Child', 'D', 37, 38), ('nonhmis:HDX_Veterans', 'C', 38, 39)],
               'Veteran Households Only', 'B', 23),
-    RangeSpec([('hmis:Veteran Adult-Child', 'E', 36, 37), ('nonhmis:HDX_Veterans', 'D', 38, 39)],
+    RangeSpec([('hmis:Veteran Adult-Child', 'E', 37, 38), ('nonhmis:HDX_Veterans', 'D', 38, 39)],
               'Veteran Households Only', 'C', 23),
     RangeSpec([('nonhmis:HDX_Veterans', 'E', 38, 39)],
               'Veteran Households Only', 'D', 23),
@@ -1560,22 +1580,25 @@ COMBINER_RANGE_SPECIFICATIONS: List[RangeSpec] = [
     # VETERAN HOUSEHOLDS - without Children
     # ========================================================================
     # Demographics
-    RangeSpec([('hmis:Veteran Without Children', 'C', 14, 16), ('nonhmis:HDX_Veterans', 'C', 48, 50)],
+    # FIX: hmis rows 14→15 start, 16→17 end (row 14 was the column header)
+    RangeSpec([('hmis:Veteran Without Children', 'C', 15, 17), ('nonhmis:HDX_Veterans', 'C', 48, 50)],
               'Veteran Households Only', 'B', 30),
-    RangeSpec([('hmis:Veteran Without Children', 'D', 14, 16), ('nonhmis:HDX_Veterans', 'D', 48, 50)],
+    RangeSpec([('hmis:Veteran Without Children', 'D', 15, 17), ('nonhmis:HDX_Veterans', 'D', 48, 50)],
               'Veteran Households Only', 'C', 30),
     RangeSpec([('nonhmis:HDX_Veterans', 'E', 48, 50)],
               'Veteran Households Only', 'D', 30),
 
     # Race and Ethnicity (Veteran Without Children)
-    RangeSpec([('hmis:Veteran Without Children', 'C', 18, 32), ('nonhmis:HDX_Veterans', 'C', 68, 82)],
+    # FIX: hmis rows 18→19 start, 32→33 end (row 18 was the race header)
+    RangeSpec([('hmis:Veteran Without Children', 'C', 19, 33), ('nonhmis:HDX_Veterans', 'C', 68, 82)],
               'Veteran Households Only', 'B', 34),
-    RangeSpec([('hmis:Veteran Without Children', 'D', 18, 32), ('nonhmis:HDX_Veterans', 'D', 68, 82)],
+    RangeSpec([('hmis:Veteran Without Children', 'D', 19, 33), ('nonhmis:HDX_Veterans', 'D', 68, 82)],
               'Veteran Households Only', 'C', 34),
     RangeSpec([('nonhmis:HDX_Veterans', 'E', 68, 82)],
               'Veteran Households Only', 'D', 34),
 
     # Chronically Homeless (Veteran Without Children)
+    # NO FIX NEEDED - row 35 is already the data row (Total number of persons)
     RangeSpec([('hmis:Veteran Without Children', 'C', 35, 35), ('nonhmis:HDX_Veterans', 'C', 83, 83)],
               'Veteran Households Only', 'B', 50),
     RangeSpec([('hmis:Veteran Without Children', 'D', 35, 35), ('nonhmis:HDX_Veterans', 'D', 83, 83)],
@@ -1587,25 +1610,28 @@ COMBINER_RANGE_SPECIFICATIONS: List[RangeSpec] = [
     # YOUTH HOUSEHOLDS - Unaccompanied Youth
     # ========================================================================
     # Demographics
-    RangeSpec([('hmis:Unaccompanied Youth', 'C', 16, 19), ('nonhmis:HDX_Youth', 'C', 3, 6)],
+    # FIX: hmis rows 16→17 start, 19→20 end (row 16 was the column header)
+    RangeSpec([('hmis:Unaccompanied Youth', 'C', 17, 20), ('nonhmis:HDX_Youth', 'C', 3, 6)],
               'Youth Households', 'B', 3),
-    RangeSpec([('hmis:Unaccompanied Youth', 'D', 16, 19), ('nonhmis:HDX_Youth', 'D', 3, 6)],
+    RangeSpec([('hmis:Unaccompanied Youth', 'D', 17, 20), ('nonhmis:HDX_Youth', 'D', 3, 6)],
               'Youth Households', 'C', 3),
     RangeSpec([('nonhmis:HDX_Youth', 'E', 3, 6)],
               'Youth Households', 'D', 3),
 
     # Race and Ethnicity (Unaccompanied Youth)
-    RangeSpec([('hmis:Unaccompanied Youth', 'C', 21, 35), ('nonhmis:HDX_Youth', 'C', 24, 38)],
+    # FIX: hmis rows 21→22 start, 35→36 end (row 21 was the race header)
+    RangeSpec([('hmis:Unaccompanied Youth', 'C', 22, 36), ('nonhmis:HDX_Youth', 'C', 24, 38)],
               'Youth Households', 'B', 8),
-    RangeSpec([('hmis:Unaccompanied Youth', 'D', 21, 35), ('nonhmis:HDX_Youth', 'D', 24, 38)],
+    RangeSpec([('hmis:Unaccompanied Youth', 'D', 22, 36), ('nonhmis:HDX_Youth', 'D', 24, 38)],
               'Youth Households', 'C', 8),
     RangeSpec([('nonhmis:HDX_Youth', 'E', 24, 38)],
               'Youth Households', 'D', 8),
 
     # Chronically Homeless (Unaccompanied Youth)
-    RangeSpec([('hmis:Unaccompanied Youth', 'C', 37, 37), ('nonhmis:HDX_Youth', 'C', 39, 39)],
+    # FIX: hmis rows 37→38 (row 37 was the chronic header)
+    RangeSpec([('hmis:Unaccompanied Youth', 'C', 38, 38), ('nonhmis:HDX_Youth', 'C', 39, 39)],
               'Youth Households', 'B', 24),
-    RangeSpec([('hmis:Unaccompanied Youth', 'D', 37, 37), ('nonhmis:HDX_Youth', 'D', 39, 39)],
+    RangeSpec([('hmis:Unaccompanied Youth', 'D', 38, 38), ('nonhmis:HDX_Youth', 'D', 39, 39)],
               'Youth Households', 'C', 24),
     RangeSpec([('nonhmis:HDX_Youth', 'E', 39, 39)],
               'Youth Households', 'D', 24),
@@ -1614,25 +1640,28 @@ COMBINER_RANGE_SPECIFICATIONS: List[RangeSpec] = [
     # YOUTH HOUSEHOLDS - Parenting Youth
     # ========================================================================
     # Demographics
-    RangeSpec([('hmis:Parenting Youth', 'D', 14, 21), ('nonhmis:HDX_Youth', 'C', 48, 55)],
+    # FIX: hmis rows 14→15 start, 21→22 end (row 14 was the column header)
+    RangeSpec([('hmis:Parenting Youth', 'D', 15, 22), ('nonhmis:HDX_Youth', 'C', 48, 55)],
               'Youth Households', 'B', 30),
-    RangeSpec([('hmis:Parenting Youth', 'E', 14, 21), ('nonhmis:HDX_Youth', 'D', 48, 55)],
+    RangeSpec([('hmis:Parenting Youth', 'E', 15, 22), ('nonhmis:HDX_Youth', 'D', 48, 55)],
               'Youth Households', 'C', 30),
     RangeSpec([('nonhmis:HDX_Youth', 'E', 48, 55)],
               'Youth Households', 'D', 30),
 
     # Race and Ethnicity (Parenting Youth)
-    RangeSpec([('hmis:Parenting Youth', 'D', 23, 37), ('nonhmis:HDX_Youth', 'C', 73, 87)],
+    # FIX: hmis rows 23→24 start, 37→38 end (row 23 was the race header)
+    RangeSpec([('hmis:Parenting Youth', 'D', 24, 38), ('nonhmis:HDX_Youth', 'C', 73, 87)],
               'Youth Households', 'B', 39),
-    RangeSpec([('hmis:Parenting Youth', 'E', 23, 37), ('nonhmis:HDX_Youth', 'D', 73, 87)],
+    RangeSpec([('hmis:Parenting Youth', 'E', 24, 38), ('nonhmis:HDX_Youth', 'D', 73, 87)],
               'Youth Households', 'C', 39),
     RangeSpec([('nonhmis:HDX_Youth', 'E', 73, 87)],
               'Youth Households', 'D', 39),
 
     # Chronically Homeless (Parenting Youth)
-    RangeSpec([('hmis:Parenting Youth', 'D', 39, 40), ('nonhmis:HDX_Youth', 'C', 88, 89)],
+    # FIX: hmis rows 39→40 start, 40→41 end (row 39 was the chronic header)
+    RangeSpec([('hmis:Parenting Youth', 'D', 40, 41), ('nonhmis:HDX_Youth', 'C', 88, 89)],
               'Youth Households', 'B', 55),
-    RangeSpec([('hmis:Parenting Youth', 'E', 39, 40), ('nonhmis:HDX_Youth', 'D', 88, 89)],
+    RangeSpec([('hmis:Parenting Youth', 'E', 40, 41), ('nonhmis:HDX_Youth', 'D', 88, 89)],
               'Youth Households', 'C', 55),
     RangeSpec([('nonhmis:HDX_Youth', 'E', 88, 89)],
               'Youth Households', 'D', 55),
@@ -1640,9 +1669,10 @@ COMBINER_RANGE_SPECIFICATIONS: List[RangeSpec] = [
     # ========================================================================
     # ADDITIONAL HOMELESS POPULATIONS (Subpopulations)
     # ========================================================================
-    RangeSpec([('hmis:Homeless Subpopulations', 'C', 14, 17), ('nonhmis:HDX_Subpopulations', 'C', 3, 6)],
+    # FIX: hmis rows 14→15 start, 17→18 end (row 14 was the section header)
+    RangeSpec([('hmis:Homeless Subpopulations', 'C', 15, 18), ('nonhmis:HDX_Subpopulations', 'C', 3, 6)],
               'Additional Homeless Populations', 'B', 3),
-    RangeSpec([('hmis:Homeless Subpopulations', 'D', 14, 17), ('nonhmis:HDX_Subpopulations', 'D', 3, 6)],
+    RangeSpec([('hmis:Homeless Subpopulations', 'D', 15, 18), ('nonhmis:HDX_Subpopulations', 'D', 3, 6)],
               'Additional Homeless Populations', 'C', 3),
     RangeSpec([('nonhmis:HDX_Subpopulations', 'E', 3, 6)],
               'Additional Homeless Populations', 'D', 3),
