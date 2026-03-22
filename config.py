@@ -1447,16 +1447,6 @@ COMBINER_TERMS_TO_DELETE: List[str] = [
 ]
 
 # Range specifications for mapping source data to template
-#
-# CORRECTION SUMMARY (19 fixes total):
-# The HMIS source ranges consistently started 1 row too early, landing on the
-# section header row instead of the first data row. All nonhmis ranges and
-# template target rows were already correct.
-#
-# Affected sheets: Without Children, Only Children, Veteran Adult-Child,
-#   Veteran Without Children, Unaccompanied Youth, Parenting Youth,
-#   Homeless Subpopulations
-# Adult-Child was the only HMIS sheet with correct ranges (no header offset).
 
 COMBINER_RANGE_SPECIFICATIONS: List[RangeSpec] = [
     # ========================================================================

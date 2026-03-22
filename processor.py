@@ -1509,18 +1509,53 @@ class CombinerDataProcessor:
                     return True
         return False
 
+    def _compute_hmis_boundaries(self, range_specs: List[Any]) -> Dict[str, Tuple[int, int]]:
+        """Compute min/max rows per HMIS sheet from range specifications.
+
+        Returns dict mapping sheet_name to (min_row, max_row) so that
+        row deletion is restricted to table data areas only.
+        """
+        boundaries: Dict[str, Tuple[int, int]] = {}
+        for spec in range_specs:
+            for source_key, col, start_row, end_row in spec.source_ranges:
+                source_type, sheet_name = self.parse_source_key(source_key)
+                if source_type != 'hmis':
+                    continue
+                if sheet_name not in boundaries:
+                    boundaries[sheet_name] = (start_row, end_row)
+                else:
+                    cur_min, cur_max = boundaries[sheet_name]
+                    boundaries[sheet_name] = (min(cur_min, start_row), max(cur_max, end_row))
+        return boundaries
+
     def clean_workbook(self, workbook: Workbook, sheets_to_clean: List[str],
-                       terms_to_delete: List[str]) -> Dict[str, int]:
-        """Clean specified sheets by removing rows with forbidden terms."""
+                       terms_to_delete: List[str],
+                       sheet_boundaries: Optional[Dict[str, Tuple[int, int]]] = None) -> Dict[str, int]:
+        """Clean specified sheets by removing rows with forbidden terms.
+
+        If sheet_boundaries is provided, only check rows within
+        {sheet_name: (min_row, max_row)} boundaries. Rows outside
+        table boundaries are preserved to avoid shifting row references.
+        """
         stats = {}
         for sheet_name in sheets_to_clean:
             if sheet_name not in workbook.sheetnames:
                 continue
             sheet = workbook[sheet_name]
             rows_to_delete = []
+
+            # Get boundaries for this sheet (if provided)
+            min_row, max_row = None, None
+            if sheet_boundaries and sheet_name in sheet_boundaries:
+                min_row, max_row = sheet_boundaries[sheet_name]
+
             for row in sheet.iter_rows():
+                row_num = row[0].row
+                # Skip rows outside table boundaries
+                if min_row is not None and (row_num < min_row or row_num > max_row):
+                    continue
                 if self.should_delete_row(row, terms_to_delete):
-                    rows_to_delete.append(row[0].row)
+                    rows_to_delete.append(row_num)
 
             deleted = 0
             for row_idx in reversed(rows_to_delete):
@@ -1699,9 +1734,13 @@ class CombinerDataProcessor:
                     combiner_logger.warning(f"Validation warnings: {errors}")
 
             # Clean HMIS data (contains "Client Doesn't Know" etc.)
+            # Only delete rows within table data boundaries to avoid
+            # shifting header/info rows that would break row references
             combiner_logger.info("Cleaning HMIS data...")
             hmis_sheets = list(self._hmis_wb.sheetnames)
-            self.clean_workbook(self._hmis_wb, hmis_sheets, terms_to_delete)
+            sheet_boundaries = self._compute_hmis_boundaries(range_specs)
+            self.clean_workbook(self._hmis_wb, hmis_sheets, terms_to_delete,
+                                sheet_boundaries=sheet_boundaries)
 
             # Process range specifications
             combiner_logger.info("Processing range specifications...")
